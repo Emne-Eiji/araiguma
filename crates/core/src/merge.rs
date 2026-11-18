@@ -315,6 +315,34 @@ fn route_group_key(route: &Route) -> RouteGroupKey {
     }
 }
 
+/// Whether two observations belong to the same route GROUP. Normally the
+/// full group key must match. One evidence-based exception (WO-03 M4):
+/// when one side did NOT observe the table (`table: None` — the
+/// `/proc/net/ipv6_route` case, whose rows span main/local/... with no
+/// table column), the table is unknown rather than main, so the
+/// table-less observation may match an observation that knows the table.
+/// The same prefix + metric + next hop with the other side's table known
+/// is the same kernel fact; the merged route keeps the known table
+/// (higher-priority `Some` wins) and the table-less note survives as
+/// provenance. Two observations that BOTH observed their tables never
+/// merge across different tables.
+fn same_group(
+    existing: &Route,
+    new: &Route,
+    existing_key: &RouteGroupKey,
+    new_key: &RouteGroupKey,
+) -> bool {
+    if existing_key == new_key {
+        return true;
+    }
+    if existing.table.is_none() || new.table.is_none() {
+        return existing_key.family == new_key.family
+            && existing_key.destination == new_key.destination
+            && existing_key.metric == new_key.metric;
+    }
+    false
+}
+
 /// Whether two observations in the same group describe the same kernel
 /// route: identical undecodable markers, or overlapping next-hop sets
 /// (a partial single-hop view matches the multipath route it came from).
@@ -337,9 +365,10 @@ fn merge_route(
     name_to_ifindex: &dyn Fn(&str) -> Option<u32>,
 ) {
     let new_key = route_group_key(&new);
-    let existing_index = into
-        .iter()
-        .position(|r| route_group_key(r) == new_key && same_kernel_route(r, &new, name_to_ifindex));
+    let existing_index = into.iter().position(|r| {
+        same_group(r, &new, &route_group_key(r), &new_key)
+            && same_kernel_route(r, &new, name_to_ifindex)
+    });
     if let Some(existing) = existing_index.map(|index| &mut into[index]) {
         merge_field(&mut existing.destination, new.destination);
         // Route-level gateway/oif only exist on single-path routes; a

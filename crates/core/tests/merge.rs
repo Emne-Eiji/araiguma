@@ -212,6 +212,177 @@ fn local_table_routes_are_kept_and_never_merged_into_main() {
     assert!(tables.contains(&(RT_TABLE_LOCAL as u32)));
 }
 
+// ── IPv6 procfs route fallback (WO-03 M4) ───────────────────────────────────
+// /proc/net/ipv6_route carries no table column and its rows span multiple
+// tables, so its observations have table: None. The same prefix + metric +
+// next hop with the other side's table known is the same kernel fact: the
+// table-less observation merges into the knowing one (which keeps its
+// table), never the other way around.
+
+/// A /proc/net/ipv6_route-shaped observation: table None, oif by name,
+/// procfs provenance, and the file's inherent caveats as notes.
+fn v6_procfs_route(
+    dst: &str,
+    prefix: u8,
+    gateway: Option<IpAddr>,
+    oif_name: &str,
+    metric: u32,
+) -> Route {
+    Route {
+        family: AddressFamily::Ipv6,
+        destination: Some(IpNet::new(dst.parse().unwrap(), prefix)),
+        gateway,
+        output_interface: None,
+        output_interface_name: Some(oif_name.into()),
+        protocol: None,
+        scope: None,
+        route_type: None,
+        metric: Some(metric),
+        table: None,
+        flags: Some(vec!["up".into()]),
+        next_hops: NextHops::Single,
+        sources: vec![ObservationSource::ProcFs],
+        notes: vec!["/proc/net/ipv6_route exposes no routing-table id".to_string()],
+    }
+}
+
+#[test]
+fn ipv6_procfs_route_merges_into_netlink_route_with_known_table() {
+    // The live shape on every system: ::1/128 is a local-table (255) route;
+    // /proc/net/ipv6_route reports it without a table. The wildcard merge
+    // must unite them instead of showing ::1/128 twice.
+    let mut netlink = observation(ProviderId::Netlink, 0);
+    netlink.interfaces = SectionResult::Observed(vec![iface(1, "lo", InterfaceKind::Loopback)]);
+    let mut local = v6_route("::1", 128, None, Some(1));
+    local.table = Some(RT_TABLE_LOCAL as u32);
+    local.sources = vec![ObservationSource::Netlink];
+    netlink.routes_v6 = SectionResult::Observed(vec![local]);
+
+    let mut sysfs = observation(ProviderId::SysFs, 1);
+    sysfs.interfaces = SectionResult::Observed(vec![iface(1, "lo", InterfaceKind::Loopback)]);
+    sysfs.routes_v6 = SectionResult::Observed(vec![v6_procfs_route("::1", 128, None, "lo", 0)]);
+
+    let snapshot = merge(vec![netlink, sysfs], 1);
+    assert_eq!(
+        snapshot.routes.len(),
+        1,
+        "the table-less procfs observation is the same kernel route"
+    );
+    let route = &snapshot.routes[0];
+    assert_eq!(
+        route.table,
+        Some(RT_TABLE_LOCAL as u32),
+        "the knowing observation's table stands; None never overwrites Some"
+    );
+    assert_eq!(
+        route.sources,
+        vec![ObservationSource::Netlink, ObservationSource::ProcFs]
+    );
+    assert!(
+        route
+            .notes
+            .iter()
+            .any(|n| n.contains("no routing-table id")),
+        "the procfs caveat survives as provenance"
+    );
+}
+
+#[test]
+fn ipv6_procfs_gateway_route_merges_and_netlink_fields_win() {
+    // A gateway route observed by both: netlink knows protocol and table;
+    // procfs knows flags. The merged route carries netlink's protocol and
+    // table, and procfs's flags only where netlink had none.
+    let mut netlink = observation(ProviderId::Netlink, 0);
+    netlink.interfaces = SectionResult::Observed(vec![iface(2, "eth0", InterfaceKind::Ethernet)]);
+    let mut gw = v6_route(
+        "2001:db8:9::",
+        64,
+        Some("2001:db8::2".parse().unwrap()),
+        Some(2),
+    );
+    gw.metric = Some(1024);
+    gw.protocol = Some(RouteProtocol::Static);
+    gw.sources = vec![ObservationSource::Netlink];
+    netlink.routes_v6 = SectionResult::Observed(vec![gw]);
+
+    let mut sysfs = observation(ProviderId::SysFs, 1);
+    sysfs.interfaces = SectionResult::Observed(vec![iface(2, "eth0", InterfaceKind::Ethernet)]);
+    sysfs.routes_v6 = SectionResult::Observed(vec![v6_procfs_route(
+        "2001:db8:9::",
+        64,
+        Some("2001:db8::2".parse().unwrap()),
+        "eth0",
+        1024,
+    )]);
+
+    let snapshot = merge(vec![netlink, sysfs], 1);
+    assert_eq!(snapshot.routes.len(), 1);
+    let route = &snapshot.routes[0];
+    assert_eq!(route.protocol, Some(RouteProtocol::Static), "netlink wins");
+    assert_eq!(
+        route.flags,
+        Some(vec!["up".to_string()]),
+        "procfs fills the flags netlink did not observe"
+    );
+    assert_eq!(route.metric, Some(1024));
+    assert_eq!(route.table, Some(RT_TABLE_MAIN as u32));
+    assert_eq!(route.output_interface, Some(2));
+}
+
+#[test]
+fn ipv6_procfs_route_with_different_metric_or_hop_never_merges() {
+    // Same prefix, different metric: a different kernel route. The
+    // table-less wildcard must not become a same-prefix wildcard.
+    let mut netlink = observation(ProviderId::Netlink, 0);
+    netlink.interfaces = SectionResult::Observed(vec![iface(2, "eth0", InterfaceKind::Ethernet)]);
+    let mut r = v6_route("2001:db8::", 64, None, Some(2));
+    r.metric = Some(256);
+    r.sources = vec![ObservationSource::Netlink];
+    netlink.routes_v6 = SectionResult::Observed(vec![r]);
+
+    let mut sysfs = observation(ProviderId::SysFs, 1);
+    sysfs.interfaces = SectionResult::Observed(vec![iface(2, "eth0", InterfaceKind::Ethernet)]);
+    sysfs.routes_v6 = SectionResult::Observed(vec![
+        // Different metric.
+        v6_procfs_route("2001:db8::", 64, None, "eth0", 512),
+        // Same metric, different output interface (a second, genuinely
+        // distinct route).
+        v6_procfs_route("2001:db8::", 64, None, "wlan0", 256),
+    ]);
+
+    let snapshot = merge(vec![netlink, sysfs], 2);
+    assert_eq!(snapshot.routes.len(), 3, "no false merges: {snapshot:?}");
+}
+
+#[test]
+fn ipv6_procfs_only_observation_keeps_unknown_table_and_survives_dedup() {
+    // The fallback scenario: netlink unavailable, only /proc/net/ipv6_route.
+    // The kernel prints its unreachable-default sentinel twice (one per
+    // table) — identical lines dedup among themselves; the table stays
+    // not observed, never invented.
+    let mut sysfs = observation(ProviderId::SysFs, 1);
+    sysfs.interfaces = SectionResult::Observed(vec![iface(1, "lo", InterfaceKind::Loopback)]);
+    sysfs.routes_v6 = SectionResult::Observed(vec![
+        v6_procfs_route("::1", 128, None, "lo", 0),
+        v6_procfs_route("::", 0, None, "lo", u32::MAX),
+        v6_procfs_route("::", 0, None, "lo", u32::MAX),
+    ]);
+
+    let snapshot = merge(vec![sysfs], 3);
+    assert_eq!(snapshot.routes.len(), 2, "identical sentinel lines dedup");
+    let unreachable = snapshot.routes.iter().find(|r| r.is_default()).unwrap();
+    assert_eq!(
+        unreachable.table, None,
+        "table not observed, not fabricated"
+    );
+    assert_eq!(unreachable.metric, Some(u32::MAX));
+    assert_eq!(
+        unreachable.sources,
+        vec![ObservationSource::ProcFs],
+        "dedup unites provenance instead of duplicating it"
+    );
+}
+
 #[test]
 fn address_flags_fill_from_procfs() {
     let mut netlink = observation(ProviderId::Netlink, 0);

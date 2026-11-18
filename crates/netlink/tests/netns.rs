@@ -14,7 +14,7 @@ use std::time::Duration;
 use araiguma_core::model::{
     AddressScope, AdminState, InterfaceKind, ObservationSource, OperState, RouteType,
 };
-use araiguma_core::provider::{DiscoveryProvider, ProviderId, ProviderState};
+use araiguma_core::provider::{DiscoveryProvider, ProviderId, ProviderState, SectionResult};
 use araiguma_netlink::{Monitor, NetlinkProvider, Signal};
 
 /// Re-exec the test binary inside a fresh netns, or return when already
@@ -333,7 +333,14 @@ async fn netns_merge_with_sysfs_fallback() {
     let mut sysfs = SysFsProvider::new();
     let observations = vec![netlink.observe().await, sysfs.observe().await];
     let snapshot = merge(observations, 8);
-    let defaults: Vec<_> = snapshot.routes.iter().filter(|r| r.is_default()).collect();
+    // v4 defaults only — since WO-03 M4 the snapshot also carries the
+    // kernel's IPv6 unreachable-default sentinel from
+    // /proc/net/ipv6_route (see below), which is_default() matches too.
+    let defaults: Vec<_> = snapshot
+        .routes
+        .iter()
+        .filter(|r| r.is_default() && r.family == araiguma_core::model::AddressFamily::Ipv4)
+        .collect();
     assert_eq!(
         defaults.len(),
         1,
@@ -344,6 +351,25 @@ async fn netns_merge_with_sysfs_fallback() {
         vec![ObservationSource::Netlink, ObservationSource::ProcFs]
     );
     assert_eq!(defaults[0].gateway.unwrap().to_string(), "198.51.100.1");
+
+    // The IPv6 side (WO-03 M4): /proc/net/ipv6_route carries the kernel's
+    // unreachable-default sentinel (::/0, metric 0xffffffff, reject), which
+    // netlink does NOT dump. It stays in the snapshot as an honest
+    // procfs-only observation with an unknown table — never dropped, never
+    // fabricated into a table id.
+    let v6_defaults: Vec<_> = snapshot
+        .routes
+        .iter()
+        .filter(|r| r.is_default() && r.family == araiguma_core::model::AddressFamily::Ipv6)
+        .collect();
+    assert_eq!(v6_defaults.len(), 1, "one v6 sentinel: {v6_defaults:?}");
+    assert_eq!(v6_defaults[0].metric, Some(u32::MAX));
+    assert_eq!(v6_defaults[0].table, None);
+    assert_eq!(v6_defaults[0].sources, vec![ObservationSource::ProcFs]);
+    assert!(v6_defaults[0]
+        .flags
+        .as_ref()
+        .is_some_and(|f| f.contains(&"reject".to_string())));
 }
 
 #[tokio::test]
@@ -510,5 +536,156 @@ async fn netns_multipath_route_observed_with_all_hops() {
     assert!(
         text.contains("nexthop via 10.1.0.1 dev ar-mp1 weight 3"),
         "{text}"
+    );
+}
+
+#[tokio::test]
+async fn netns_ipv6_procfs_routes_merge_and_fallback() {
+    // WO-03 M4: the real /proc/net/ipv6_route inside the transient
+    // namespace. The same kernel route observed by netlink (table known)
+    // and procfs (no table column) must appear ONCE with united provenance;
+    // a procfs-only fallback keeps the table honestly unknown; a missing
+    // file is a failed section, never "no IPv6 routes".
+    if !ensure_netns("netns_ipv6_procfs_routes_merge_and_fallback") {
+        return; // parent: the child already ran and was asserted
+    }
+
+    ip(&["link", "set", "lo", "up"]);
+    ip(&["link", "add", "ar-v6", "type", "dummy"]);
+    ip(&["link", "set", "ar-v6", "up"]);
+    ip(&["address", "add", "2001:db8::1/64", "dev", "ar-v6", "nodad"]);
+    ip(&[
+        "route",
+        "add",
+        "2001:db8:9::/64",
+        "via",
+        "2001:db8::2",
+        "dev",
+        "ar-v6",
+    ]);
+
+    // The real file, through the real provider.
+    let mut sysfs = araiguma_sysfs::SysFsProvider::new();
+    let sysfs_observation = sysfs.observe().await;
+    let proc_routes = sysfs_observation
+        .routes_v6
+        .items()
+        .iter()
+        .filter(|r| r.destination.is_some())
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        matches!(sysfs_observation.routes_v6, SectionResult::Observed(_)),
+        "the section is observed, not unsupported"
+    );
+    assert!(!proc_routes.is_empty(), "a live namespace has IPv6 routes");
+
+    // The gateway route from the FILE alone: gateway parsed, metric parsed
+    // (hex), table not observed, procfs provenance.
+    let file_gateway = proc_routes
+        .iter()
+        .find(|r| r.destination.as_ref().unwrap().to_string() == "2001:db8:9::/64")
+        .expect("the route we added is in /proc/net/ipv6_route");
+    assert_eq!(
+        file_gateway.gateway.unwrap().to_string(),
+        "2001:db8::2",
+        "nexthop column parses big-endian hex"
+    );
+    assert_eq!(file_gateway.table, None, "no table column in the file");
+    assert_eq!(
+        file_gateway.metric,
+        Some(1024),
+        "metric 0x400 = IP6_RT_PRIO_USER, matching the netlink RTA_PRIORITY"
+    );
+    assert_eq!(file_gateway.output_interface_name.as_deref(), Some("ar-v6"));
+    assert!(file_gateway
+        .flags
+        .as_ref()
+        .is_some_and(|f| f.contains(&"gateway".to_string())));
+
+    // Full merge: netlink (priority 0) + sysfs (priority 1).
+    let mut netlink = NetlinkProvider::new();
+    let netlink_observation = netlink.observe().await;
+    let snapshot = araiguma_core::merge::merge(vec![netlink_observation, sysfs_observation], 7);
+
+    // The gateway route appears exactly once with united provenance and
+    // netlink's richer fields standing.
+    let gateway_routes: Vec<_> = snapshot
+        .routes
+        .iter()
+        .filter(|r| {
+            r.destination
+                .as_ref()
+                .is_some_and(|d| d.to_string() == "2001:db8:9::/64")
+        })
+        .collect();
+    assert_eq!(
+        gateway_routes.len(),
+        1,
+        "one kernel route: {gateway_routes:?}"
+    );
+    let gateway = gateway_routes[0];
+    assert_eq!(gateway.gateway.unwrap().to_string(), "2001:db8::2");
+    assert!(
+        gateway.sources.contains(&ObservationSource::Netlink)
+            && gateway.sources.contains(&ObservationSource::ProcFs),
+        "both providers observed it: {:?}",
+        gateway.sources
+    );
+    assert_eq!(
+        gateway.protocol,
+        Some(araiguma_core::model::RouteProtocol::Boot),
+        "iproute2 adds routes as RTPROT_BOOT; netlink's protocol stands over procfs's not-observed"
+    );
+
+    // The local-table ::1/128 (the wildcard case): netlink knows table 255,
+    // the file does not — still exactly one route, table attributed by the
+    // observation that could see it.
+    let loopback_routes: Vec<_> = snapshot
+        .routes
+        .iter()
+        .filter(|r| {
+            r.destination
+                .as_ref()
+                .is_some_and(|d| d.to_string() == "::1/128")
+        })
+        .collect();
+    assert_eq!(
+        loopback_routes.len(),
+        1,
+        "no duplicate ::1/128: {loopback_routes:?}"
+    );
+    assert_eq!(loopback_routes[0].table, Some(255));
+    assert!(loopback_routes[0]
+        .sources
+        .contains(&ObservationSource::ProcFs));
+
+    // Cross-validation: iproute2 agrees about the gateway route.
+    let output = Command::new("ip")
+        .args(["-6", "route", "show", "2001:db8:9::/64"])
+        .output()
+        .expect("ip -6 route show");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        text.contains("via 2001:db8::2 dev ar-v6"),
+        "iproute2 agrees: {text}"
+    );
+    assert!(
+        text.contains("metric 1024"),
+        "iproute2 confirms the metric observation: {text}"
+    );
+    // (iproute2 omits "proto boot" from the display — boot is the default
+    // display protocol — so the protocol cross-check stays at the model
+    // level above.)
+
+    // The fallback semantics: against an INJECTED root without the file,
+    // the section is Failed — a missing file is not evidence of zero
+    // routes (the transient namespace itself is never modified).
+    let mut broken =
+        araiguma_sysfs::SysFsProvider::with_roots("/sys", "/nonexistent-araiguma-proc");
+    let broken_observation = broken.observe().await;
+    assert!(
+        matches!(broken_observation.routes_v6, SectionResult::Failed(_)),
+        "a missing /proc/net/ipv6_route fails the section instead of claiming zero routes"
     );
 }

@@ -39,7 +39,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
-        "routesUsing": 0,
+        "routesUsing": 1,
         "defaultRoutes": 0,
         "sources": [
           "netlink",
@@ -100,7 +100,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
-        "routesUsing": 2,
+        "routesUsing": 3,
         "defaultRoutes": 1,
         "sources": [
           "netlink",

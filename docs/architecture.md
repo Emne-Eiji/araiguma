@@ -117,6 +117,13 @@ Future providers (NetworkManager D-Bus, systemd-resolved D-Bus,
 systemd-networkd) implement the same trait at their own priority; nothing in
 the pipeline assumes a specific provider set.
 
+The sysfs provider reads `/sys/class/net` (interfaces), `/proc/net/if_inet6`
+(IPv6 addresses), `/proc/net/route` (main-table IPv4 routes), and — since
+WO-03 M4 — `/proc/net/ipv6_route` (IPv6 routes). That file spans multiple
+routing tables without a table column, so its routes carry `table: None`
+with a note; a missing file is a `Failed` section, never an observed "no
+IPv6 routes" (absence of the file is not evidence about the route table).
+
 ## Merge rules
 
 1. Providers ordered by priority (netlink 0, sysfs 1).
@@ -137,6 +144,12 @@ the pipeline assumes a specific provider set.
    observation instead of appearing as a separate route. Identical
    `Undecoded` markers also deduplicate; a partial single-path view never
    writes route-level gateway/oif onto a multipath observation.
+   One evidence-based table rule (WO-03 M4): `/proc/net/ipv6_route` has no
+   table column (`table: None` — unknown, spanning main/local/...), so a
+   table-less observation matches a knowing observation on family +
+   destination + metric + next hop, and the merged route keeps the table
+   the knowing side observed. Two observations that both observed their
+   tables never merge across different tables.
 4. Output-interface enrichment: merged routes carry both ifindex and name
    when either is resolvable — including every multipath hop.
 

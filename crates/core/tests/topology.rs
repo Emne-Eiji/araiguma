@@ -166,6 +166,34 @@ fn server_tunnel_topology_missing_gateway_default() {
 }
 
 #[test]
+fn unreachable_default_sentinel_is_not_an_onlink_next_hop() {
+    // WO-03 M4: /proc/net/ipv6_route carries the kernel's unreachable-default
+    // sentinel (::/0, metric 0xffffffff, RTF_REJECT). A node whose ONLY
+    // default route is that sentinel must not be annotated as having an
+    // "on-link next hop" — a reject route carries no traffic.
+    let doc = build_topology(&fixture("incomplete-observations"));
+    let lo = doc.nodes.iter().find(|n| n.label == "lo").unwrap();
+    assert_eq!(
+        lo.detail.default_routes, 1,
+        "the sentinel IS a default route"
+    );
+    assert!(
+        lo.annotations
+            .iter()
+            .any(|a| a.contains("only an unreachable (reject) default route")),
+        "honest annotation for the sentinel: {:?}",
+        lo.annotations
+    );
+    assert!(
+        !lo.annotations
+            .iter()
+            .any(|a| a.contains("on-link next hop")),
+        "a reject route is not an on-link next hop: {:?}",
+        lo.annotations
+    );
+}
+
+#[test]
 fn dummy_virtual_topology_structural_edges() {
     let doc = build_topology(&fixture("dummy-virtual"));
 

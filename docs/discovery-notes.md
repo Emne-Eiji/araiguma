@@ -125,6 +125,22 @@ future work); IPv6 routes therefore come only from netlink today.
     route (verified live), so a procfs observation is a partial view of
     the same kernel route — the merge treats overlapping next-hop sets as
     the same route rather than counting it twice (WO-03 M3).
+14. **`/proc/net/ipv6_route` format** (WO-03 M4, verified live on kernel
+    5.10 and cross-checked with `ip -6 route`): columns
+    `dst dst_len src src_len nexthop metric refcnt use flags dev`, every
+    numeric column hex except the device; addresses big-endian (unlike
+    `/proc/net/route`'s little-endian IPv4). The metric matches the
+    netlink `RTA_PRIORITY` (connected/addrconf routes 256 =
+    `IP6_RT_PRIO_ADDRCONF`, user-added 1024 = `IP6_RT_PRIO_USER`), so
+    cross-provider dedup aligns. The file spans MULTIPLE tables (main,
+    local, ...) with NO table column — the table is not observable and
+    the model records `None` with a note. It also contains the kernel's
+    unreachable-default sentinels (`::/0`, metric `ffffffff`, flags
+    `RTF_NONEXTHOP|RTF_REJECT`) — printed twice on this kernel and NOT
+    included in netlink dumps; they are kept as honest procfs-only
+    observations. iproute2 omits `proto boot` from its display (boot is
+    the default display protocol), so a protocol cross-check stays at the
+    model level.
 
 ## Not observable (today, honestly reported as not observed)
 

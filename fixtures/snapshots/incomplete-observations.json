@@ -190,6 +190,87 @@
         "table implied: /proc/net/route exposes only the main table (254)"
       ],
       "nextHops": "single"
+    },
+    {
+      "family": "ipv6",
+      "destination": {
+        "address": "::",
+        "prefixLen": 0
+      },
+      "gateway": null,
+      "outputInterface": 1,
+      "outputInterfaceName": "lo",
+      "protocol": null,
+      "scope": null,
+      "routeType": null,
+      "metric": 4294967295,
+      "table": null,
+      "flags": [
+        "reject",
+        "nonexthop"
+      ],
+      "nextHops": "single",
+      "sources": [
+        "procfs"
+      ],
+      "notes": [
+        "/proc/net/ipv6_route exposes no routing-table id (its rows span multiple tables, e.g. main and local) and no protocol/scope/type; the table stays not observed and netlink's table attribution takes priority",
+        "IPv6 route flags are mapped from the RTF_* constants in linux/ipv6_route.h and linux/route.h; bits outside those constants are not represented"
+      ]
+    },
+    {
+      "family": "ipv6",
+      "destination": {
+        "address": "fe80::",
+        "prefixLen": 64
+      },
+      "gateway": null,
+      "outputInterface": 2,
+      "outputInterfaceName": "eth0",
+      "protocol": null,
+      "scope": null,
+      "routeType": null,
+      "metric": 256,
+      "table": null,
+      "flags": [
+        "up"
+      ],
+      "nextHops": "single",
+      "sources": [
+        "procfs"
+      ],
+      "notes": [
+        "/proc/net/ipv6_route exposes no routing-table id (its rows span multiple tables, e.g. main and local) and no protocol/scope/type; the table stays not observed and netlink's table attribution takes priority",
+        "IPv6 route flags are mapped from the RTF_* constants in linux/ipv6_route.h and linux/route.h; bits outside those constants are not represented"
+      ]
+    },
+    {
+      "family": "ipv6",
+      "destination": {
+        "address": "::1",
+        "prefixLen": 128
+      },
+      "gateway": null,
+      "outputInterface": 1,
+      "outputInterfaceName": "lo",
+      "protocol": null,
+      "scope": null,
+      "routeType": null,
+      "metric": 0,
+      "table": null,
+      "flags": [
+        "up",
+        "nonexthop",
+        "local"
+      ],
+      "nextHops": "single",
+      "sources": [
+        "procfs"
+      ],
+      "notes": [
+        "/proc/net/ipv6_route exposes no routing-table id (its rows span multiple tables, e.g. main and local) and no protocol/scope/type; the table stays not observed and netlink's table attribution takes priority",
+        "IPv6 route flags are mapped from the RTF_* constants in linux/ipv6_route.h and linux/route.h; bits outside those constants are not represented"
+      ]
     }
   ],
   "providers": [
@@ -269,7 +350,8 @@
         {
           "section": "routesV6",
           "outcome": {
-            "kind": "unsupported"
+            "kind": "observed",
+            "count": 3
           }
         }
       ],

@@ -13,7 +13,9 @@
       "interfaceKind": "loopback",
       "kindDetail": null,
       "state": "unknown",
-      "annotations": [],
+      "annotations": [
+        "only an unreachable (reject) default route observed; no usable default next hop — upstream is not observed"
+      ],
       "detail": {
         "ifindex": 1,
         "addresses": [
@@ -39,8 +41,8 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
-        "routesUsing": 1,
-        "defaultRoutes": 0,
+        "routesUsing": 3,
+        "defaultRoutes": 1,
         "sources": [
           "sysfs"
         ],
@@ -99,7 +101,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
-        "routesUsing": 2,
+        "routesUsing": 3,
         "defaultRoutes": 1,
         "sources": [
           "sysfs"

@@ -2,7 +2,8 @@
 //!
 //! The sysfs/procfs discovery provider: a read-only fallback that reads
 //! `/sys/class/net` (interface attributes) and `/proc/net/if_inet6` /
-//! `/proc/net/route` (IPv6 addresses, main-table IPv4 routes).
+//! `/proc/net/route` / `/proc/net/ipv6_route` (IPv6 addresses, main-table
+//! IPv4 routes, multi-table IPv6 routes).
 //!
 //! The provider is strictly a *fallback*: netlink observes strictly more, so
 //! this provider runs at lower merge priority and only fills gaps. Its
@@ -12,7 +13,8 @@
 //!
 //! Both roots are injectable for fixture tests: `with_roots(sys_root,
 //! proc_root)` expects `<sys_root>/class/net/...` and
-//! `<proc_root>/net/route`, `<proc_root>/net/if_inet6`.
+//! `<proc_root>/net/route`, `<proc_root>/net/if_inet6`,
+//! `<proc_root>/net/ipv6_route`.
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -31,6 +33,8 @@ const NOTE_IF_INET6: &str = "/proc/net/if_inet6 exposes the address scope and IF
 const NOTE_ROUTE_FIELDS: &str =
     "route fields protocol/scope/type are not available from /proc/net/route";
 const NOTE_TABLE_IMPLIED: &str = "table implied: /proc/net/route exposes only the main table (254)";
+const NOTE_V6_ROUTE_LIMITS: &str = "/proc/net/ipv6_route exposes no routing-table id (its rows span multiple tables, e.g. main and local) and no protocol/scope/type; the table stays not observed and netlink's table attribution takes priority";
+const NOTE_V6_FLAGS: &str = "IPv6 route flags are mapped from the RTF_* constants in linux/ipv6_route.h and linux/route.h; bits outside those constants are not represented";
 
 const NOTE_IFACE_CAVEAT_ETHERNET: &str = "classification caveat: sysfs cannot distinguish dummy, veth, vlan and similar virtual interfaces from Ethernet (same ARPHRD type)";
 const NOTE_IFACE_CAVEAT_VIRTUAL: &str = "classification caveat: sysfs cannot classify this interface further (ARPHRD_NONE); netlink would likely classify it as wireguard or tunnel";
@@ -190,6 +194,57 @@ impl SysFsProvider {
         }
         SectionResult::Observed(routes)
     }
+
+    /// Read IPv6 routes from `<proc_root>/net/ipv6_route` (WO-03 M4).
+    ///
+    /// Semantics verified live (kernel 5.10, cross-checked with `ip -6
+    /// route`): columns dst dst_len src src_len nexthop metric refcnt use
+    /// flags dev, all hex except dev. The file spans MULTIPLE routing tables
+    /// without a table column, so the model records `table: None` — never
+    /// an invented id — with a note. An all-zero nexthop is the kernel's
+    /// observed "no gateway" (on-link) encoding. A missing file is a
+    /// `Failed` section ("cannot read"), NOT an observed "no IPv6 routes":
+    /// absence of the file is not evidence about the route table.
+    pub fn read_routes_v6(&self, name_to_ifindex: &HashMap<String, u32>) -> SectionResult<Route> {
+        let path = self.proc_root.join("net/ipv6_route");
+        let content = match std::fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(error) => {
+                return SectionResult::Failed(format!("cannot read {}: {error}", path.display()))
+            }
+        };
+        let mut routes = Vec::new();
+        for line in content.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Some(entry) = parse::parse_route_v6_line(line) else {
+                continue;
+            };
+            routes.push(Route {
+                family: AddressFamily::Ipv6,
+                destination: Some(IpNet::new(IpAddr::V6(entry.destination), entry.prefix_len)),
+                // Gateway None here means the kernel reported no gateway
+                // (on-link) — an observed absence, same as the v4 file.
+                gateway: entry.gateway.map(IpAddr::V6),
+                output_interface: name_to_ifindex.get(&entry.iface).copied(),
+                output_interface_name: Some(entry.iface),
+                protocol: None,
+                scope: None,
+                route_type: None,
+                metric: Some(entry.metric),
+                // The file has no table column; rows span tables. Not
+                // observed — never fabricated (the v4 file, by contrast,
+                // genuinely exposes main-table rows only).
+                table: None,
+                flags: Some(parse::route_v6_flags(entry.flags_raw)),
+                next_hops: NextHops::Single,
+                sources: vec![ObservationSource::ProcFs],
+                notes: vec![NOTE_V6_ROUTE_LIMITS.to_string(), NOTE_V6_FLAGS.to_string()],
+            });
+        }
+        SectionResult::Observed(routes)
+    }
 }
 
 fn read_file(path: &Path) -> Option<String> {
@@ -296,6 +351,7 @@ impl DiscoveryProvider for SysFsProvider {
         };
         let addresses_v6 = self.read_addresses_v6();
         let routes_v4 = self.read_routes_v4(&name_to_ifindex);
+        let routes_v6 = self.read_routes_v6(&name_to_ifindex);
 
         let mut notes = vec![
             NOTE_CLASSIFICATION.to_string(),
@@ -316,7 +372,7 @@ impl DiscoveryProvider for SysFsProvider {
             addresses_v4: SectionResult::Unsupported,
             addresses_v6,
             routes_v4,
-            routes_v6: SectionResult::Unsupported,
+            routes_v6,
             fidelity_limited: true,
             notes,
         }

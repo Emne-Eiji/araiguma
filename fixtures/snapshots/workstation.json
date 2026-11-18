@@ -451,7 +451,8 @@
       "table": 254,
       "flags": [],
       "sources": [
-        "netlink"
+        "netlink",
+        "procfs"
       ],
       "notes": [],
       "nextHops": "single"
@@ -468,11 +469,12 @@
       "protocol": "kernel",
       "scope": "universe",
       "routeType": "unicast",
-      "metric": 0,
+      "metric": 256,
       "table": 254,
       "flags": [],
       "sources": [
-        "netlink"
+        "netlink",
+        "procfs"
       ],
       "notes": [],
       "nextHops": "single"
@@ -493,7 +495,8 @@
       "table": 255,
       "flags": [],
       "sources": [
-        "netlink"
+        "netlink",
+        "procfs"
       ],
       "notes": [],
       "nextHops": "single"
@@ -576,7 +579,8 @@
         {
           "section": "routesV6",
           "outcome": {
-            "kind": "unsupported"
+            "kind": "observed",
+            "count": 3
           }
         }
       ],

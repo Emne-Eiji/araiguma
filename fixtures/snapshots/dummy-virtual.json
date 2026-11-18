@@ -360,6 +360,56 @@
       ],
       "notes": [],
       "nextHops": "single"
+    },
+    {
+      "family": "ipv6",
+      "destination": {
+        "address": "fe80::",
+        "prefixLen": 64
+      },
+      "gateway": null,
+      "outputInterface": 2,
+      "outputInterfaceName": "eth0",
+      "protocol": "kernel",
+      "scope": "universe",
+      "routeType": "unicast",
+      "metric": 256,
+      "table": 254,
+      "flags": [
+        "up"
+      ],
+      "nextHops": "single",
+      "sources": [
+        "netlink",
+        "procfs"
+      ],
+      "notes": []
+    },
+    {
+      "family": "ipv6",
+      "destination": {
+        "address": "::1",
+        "prefixLen": 128
+      },
+      "gateway": null,
+      "outputInterface": 1,
+      "outputInterfaceName": "lo",
+      "protocol": "kernel",
+      "scope": "universe",
+      "routeType": "unicast",
+      "metric": 0,
+      "table": 255,
+      "flags": [
+        "up",
+        "nonexthop",
+        "local"
+      ],
+      "nextHops": "single",
+      "sources": [
+        "netlink",
+        "procfs"
+      ],
+      "notes": []
     }
   ],
   "providers": [
@@ -399,7 +449,7 @@
           "section": "routesV6",
           "outcome": {
             "kind": "observed",
-            "count": 0
+            "count": 2
           }
         }
       ],
@@ -439,7 +489,8 @@
         {
           "section": "routesV6",
           "outcome": {
-            "kind": "unsupported"
+            "kind": "observed",
+            "count": 2
           }
         }
       ],

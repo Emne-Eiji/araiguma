@@ -176,7 +176,9 @@ test('provider status view reports both providers honestly', async ({ page }) =>
   await expect(sysfs.getByText('degraded', { exact: false })).toBeVisible();
 
   // Section outcomes include counts and an unsupported statement.
-  await expect(sysfs.getByText('not supported by this source')).toHaveCount(2);
+  // Since WO-03 M4 the sysfs provider parses /proc/net/ipv6_route, so its
+  // only remaining unsupported section is IPv4 addresses.
+  await expect(sysfs.getByText('not supported by this source')).toHaveCount(1);
   await expect(netlink.getByText('9 observed')).toBeVisible();
 
   // Notes are shown verbatim.
@@ -316,11 +318,13 @@ test('import workflow: noted observations are marked and explained in the routes
 
   await page.getByTestId('nav-routes').click();
   const rows = page.getByTestId('routes-table').locator('tbody tr');
-  await expect(rows).toHaveCount(3);
+  // 3 procfs v4 routes + 3 procfs v6 routes (WO-03 M4).
+  await expect(rows).toHaveCount(6);
 
-  // Every procfs route carries the implied-table note and the marker.
+  // Every route carries a provider caveat (v4: implied table; v6: file
+  // limits) and the marker.
   const marked = rows.filter({ has: page.locator('.note-badge') });
-  await expect(marked).toHaveCount(3);
+  await expect(marked).toHaveCount(6);
 
   await marked.first().click();
   const panel = page.getByTestId('route-details');
@@ -329,4 +333,16 @@ test('import workflow: noted observations are marked and explained in the routes
   await expect(panel.getByTestId('route-notes')).toContainText(
     /table implied: \/proc\/net\/route exposes only the main table/,
   );
+
+  // An IPv6 route from the same file shows its own caveat: the table is
+  // not observed (the file has no table column) — displayed as — with the
+  // explanation in the notes.
+  const v6row = rows.filter({ hasText: 'fe80::/64' });
+  await expect(v6row).toHaveCount(1);
+  await v6row.click();
+  await expect(panel.getByTestId('route-notes')).toContainText(
+    /no routing-table id/,
+  );
+  const tableCell = v6row.locator('td').last();
+  await expect(tableCell).toHaveText('—', { useInnerText: true });
 });

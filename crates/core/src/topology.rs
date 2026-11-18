@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     Address, AdminState, Interface, InterfaceKind, IpNet, MacObservation, ObservationSource,
-    OperState, Route, RT_TABLE_MAIN,
+    OperState, Route, RouteType, RT_TABLE_MAIN,
 };
 use crate::snapshot::NetworkSnapshot;
 
@@ -477,6 +477,24 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
     }
 }
 
+/// A route that cannot carry traffic: the kernel's unreachable encodings.
+/// Two independent observations carry this: the netlink route type
+/// (`blackhole` / `unreachable` / `prohibit`) and `RTF_REJECT` in
+/// `/proc/net/ipv6_route` flags (the file's unreachable-default sentinel —
+/// verified live, WO-03 M4). Such a default route must not be presented as
+/// an on-link next hop.
+fn is_unusable_route(route: &Route) -> bool {
+    if let Some(RouteType::Unreachable | RouteType::Blackhole | RouteType::Prohibit) =
+        route.route_type
+    {
+        return true;
+    }
+    route
+        .flags
+        .as_ref()
+        .is_some_and(|flags| flags.iter().any(|flag| flag == "reject"))
+}
+
 fn interface_node(snapshot: &NetworkSnapshot, iface: &Interface) -> TopologyNode {
     let addresses: Vec<Address> = snapshot
         .addresses_on(iface.ifindex)
@@ -485,6 +503,10 @@ fn interface_node(snapshot: &NetworkSnapshot, iface: &Interface) -> TopologyNode
         .collect();
     let routes_using = snapshot.routes_using_interface(iface.ifindex);
     let default_routes = routes_using.iter().filter(|r| r.is_default()).count();
+    let usable_default_routes = routes_using
+        .iter()
+        .filter(|r| r.is_default() && !is_unusable_route(r))
+        .count();
 
     let state = node_state(iface);
     let mut annotations = Vec::new();
@@ -492,13 +514,25 @@ fn interface_node(snapshot: &NetworkSnapshot, iface: &Interface) -> TopologyNode
         let via_gateway = routes_using
             .iter()
             .any(|r| r.is_default() && r.gateway.is_some());
-        if !via_gateway {
+        if usable_default_routes > 0 {
+            if !via_gateway {
+                annotations.push(
+                    "has a default route without a gateway (on-link next hop); anything beyond it is not observed"
+                        .into(),
+                );
+            }
+            annotations.push(NO_UPSTREAM_NOTE.into());
+        } else {
+            // Only the kernel's unreachable encodings observed (route type
+            // from netlink; RTF_REJECT from /proc/net/ipv6_route — the
+            // file's unreachable-default sentinel, WO-03 M4). Claiming an
+            // "on-link next hop" here would be false: a reject route
+            // carries no traffic.
             annotations.push(
-                "has a default route without a gateway (on-link next hop); anything beyond it is not observed"
+                "only an unreachable (reject) default route observed; no usable default next hop — upstream is not observed"
                     .into(),
             );
         }
-        annotations.push(NO_UPSTREAM_NOTE.into());
     }
     match iface.kind {
         InterfaceKind::Wireguard => annotations.push(

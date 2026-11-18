@@ -57,7 +57,9 @@ describe('route table filtering', () => {
 
   it('empty route observations are valid', () => {
     const empty = fixtures['incomplete-observations'].snapshot;
-    expect(visibleRoutes(empty, [254]).length).toBe(3);
+    // 3 procfs v4 + 3 procfs v6 (WO-03 M4): the file-spanning-tables
+    // routes with table null group with main for display.
+    expect(visibleRoutes(empty, [254]).length).toBe(6);
     expect(tableOptions(empty).map((t) => t.table)).toEqual([254]);
   });
 });
@@ -131,11 +133,15 @@ describe('route accessibility and limitation markers (WO-02 correction §4/§9.4
   });
 
   it('the incomplete-observations fixture covers the note-marker path', () => {
-    // The procfs-only scenario carries implied-table notes — the UI must
-    // be able to show provider caveats honestly from the table itself.
+    // The procfs-only scenario carries implied-table notes on v4 and
+    // file-limitation notes on v6 (WO-03 M4) — the UI must be able to show
+    // provider caveats honestly from the table itself.
     const marked = fixtures['incomplete-observations'].snapshot.routes.filter(routeHasLimitationNotes);
-    expect(marked.length).toBe(3);
+    expect(marked.length).toBe(6);
     expect(marked[0].notes[0]).toMatch(/table implied/);
+    expect(
+      marked.some((r) => r.notes.some((n) => n.includes('no routing-table id'))),
+    ).toBe(true);
   });
 });
 

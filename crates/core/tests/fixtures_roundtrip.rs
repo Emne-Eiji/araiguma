@@ -92,6 +92,7 @@ fn workstation_fixture_covers_required_scenarios() {
 // Local aliases keep the assert! Debug formatting readable.
 use araiguma_core::model::{
     AddressFamily as AddressFamilyAlias, InterfaceKind as InterfaceKindAlias,
+    ObservationSource as ObservationSourceAlias,
 };
 
 #[test]
@@ -124,6 +125,37 @@ fn incomplete_fixture_has_netlink_failure_and_null_fields() {
         .interfaces
         .iter()
         .any(|i| i.notes.iter().any(|n| n.contains("sysfs cannot"))));
+
+    // WO-03 M4: the procfs-only scenario now carries IPv6 routes from
+    // /proc/net/ipv6_route — table not observed (the file has no table
+    // column), RTF_* flags mapped, the kernel's unreachable-default
+    // sentinel included, and nothing fabricated.
+    let v6: Vec<_> = snapshot
+        .routes
+        .iter()
+        .filter(|r| r.family == AddressFamilyAlias::Ipv6)
+        .collect();
+    assert_eq!(v6.len(), 3, "fe80::/64, ::1/128, and the ::/0 sentinel");
+    for route in &v6 {
+        assert_eq!(route.table, None, "no table column in the file");
+        assert_eq!(route.protocol, None);
+        assert_eq!(route.scope, None);
+        assert_eq!(route.route_type, None);
+        assert_eq!(route.sources, vec![ObservationSourceAlias::ProcFs]);
+        assert!(route
+            .notes
+            .iter()
+            .any(|n| n.contains("no routing-table id")));
+    }
+    let sentinel = v6
+        .iter()
+        .find(|r| r.is_default())
+        .expect("the unreachable-default sentinel");
+    assert_eq!(sentinel.metric, Some(u32::MAX));
+    assert_eq!(
+        sentinel.flags,
+        Some(vec!["reject".to_string(), "nonexthop".to_string()])
+    );
 }
 
 // ── MAC observation semantics (WO-02 correction §5) ─────────────────────

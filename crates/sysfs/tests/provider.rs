@@ -150,6 +150,88 @@ fn routerish_procfs_addresses_and_routes() {
     assert_eq!(onlink.gateway, None, "zero gateway means on-link");
 }
 
+/// WO-03 M4: /proc/net/ipv6_route parsing against the synthetic fixture
+/// (whose format was verified live against kernel 5.10 and cross-checked
+/// with `ip -6 route`).
+#[test]
+fn routerish_ipv6_routes() {
+    let mut p = provider("empty", "router-ish");
+    let observation = observe(&mut p);
+
+    let routes = observation.routes_v6.items();
+    assert_eq!(routes.len(), 6);
+
+    // Gateway route: 2001:db8:9::/64 via 2001:db8::2 on eth0, metric
+    // 0x400 = 1024, flags up|gateway.
+    let gateway = routes
+        .iter()
+        .find(|r| r.destination.unwrap().to_string() == "2001:db8:9::/64")
+        .unwrap();
+    assert_eq!(
+        gateway.gateway.unwrap().to_string(),
+        "2001:db8::2",
+        "nexthop column is big-endian hex, unlike /proc/net/route"
+    );
+    assert_eq!(gateway.metric, Some(1024));
+    assert_eq!(
+        gateway.flags,
+        Some(vec!["up".to_string(), "gateway".to_string()])
+    );
+    assert_eq!(gateway.output_interface_name.as_deref(), Some("eth0"));
+    assert_eq!(
+        gateway.output_interface, None,
+        "no sysfs interfaces to resolve"
+    );
+    assert_eq!(gateway.next_hops, araiguma_core::model::NextHops::Single);
+
+    // The file exposes no table id — not observed, never fabricated, with
+    // a note (its rows span main and local tables).
+    assert_eq!(gateway.table, None);
+    assert!(gateway
+        .notes
+        .iter()
+        .any(|n| n.contains("no routing-table id")));
+
+    // The local-table ::1/128 keeps its observed-absence gateway and the
+    // RTF_LOCAL flag mapping (0x80200001 = local|nonexthop|up).
+    let local = routes
+        .iter()
+        .find(|r| r.destination.unwrap().to_string() == "::1/128")
+        .unwrap();
+    assert_eq!(local.gateway, None, "all-zero nexthop = on-link (observed)");
+    assert_eq!(local.metric, Some(0));
+    assert_eq!(
+        local.flags,
+        Some(
+            vec!["up", "nonexthop", "local"]
+                .into_iter()
+                .map(String::from)
+                .collect()
+        )
+    );
+
+    // The kernel's unreachable-default sentinel (metric ffffffff,
+    // reject|nonexthop) parses like any other row.
+    let unreachable = routes
+        .iter()
+        .find(|r| r.destination.unwrap().is_default())
+        .unwrap();
+    assert_eq!(unreachable.metric, Some(u32::MAX));
+    assert_eq!(
+        unreachable.flags,
+        Some(vec!["reject".to_string(), "nonexthop".to_string()])
+    );
+
+    // procfs cannot observe these — they stay None, never fabricated.
+    assert_eq!(gateway.protocol, None);
+    assert_eq!(gateway.scope, None);
+    assert_eq!(gateway.route_type, None);
+    for route in routes {
+        assert_eq!(route.sources, vec![ObservationSource::ProcFs]);
+        assert_eq!(route.family, araiguma_core::model::AddressFamily::Ipv6);
+    }
+}
+
 #[test]
 fn combined_laptop_full_run_and_merge() {
     let mut p = provider("combined-laptop", "combined-laptop");
@@ -173,6 +255,27 @@ fn combined_laptop_full_run_and_merge() {
     // IPv6 addresses landed on the right interfaces.
     let eth0_addrs = snapshot.addresses_on(2);
     assert_eq!(eth0_addrs.len(), 2);
+
+    // IPv6 routes (WO-03 M4) resolve oif names through the sysfs listing
+    // and land in the merged snapshot with observed-absence semantics.
+    let v6: Vec<_> = snapshot
+        .routes
+        .iter()
+        .filter(|r| r.family == araiguma_core::model::AddressFamily::Ipv6)
+        .collect();
+    assert_eq!(v6.len(), 5, "combined-laptop ipv6_route has 5 rows");
+    let fe80 = v6
+        .iter()
+        .find(|r| r.destination.unwrap().to_string() == "fe80::/64")
+        .unwrap();
+    assert_eq!(fe80.output_interface, Some(2), "eth0 resolves via sysfs");
+    assert_eq!(fe80.gateway, None);
+    let unreachable = v6
+        .iter()
+        .find(|r| r.destination.unwrap().is_default())
+        .expect("the kernel sentinel default is in the file");
+    assert_eq!(unreachable.metric, Some(u32::MAX));
+    assert_eq!(unreachable.table, None, "no table column in the file");
 }
 
 #[test]
@@ -191,6 +294,12 @@ fn empty_observation_is_valid() {
         observation.routes_v4,
         SectionResult::Observed(ref items) if items.is_empty()
     ));
+    // An EXISTING empty ipv6_route file is an observed empty route table —
+    // evidence, unlike a missing file (see missing_roots_fail_without_panicking).
+    assert!(matches!(
+        observation.routes_v6,
+        SectionResult::Observed(ref items) if items.is_empty()
+    ));
     assert_eq!(observation.state(), ProviderState::Degraded);
 }
 
@@ -202,6 +311,13 @@ fn missing_roots_fail_without_panicking() {
     assert!(matches!(observation.interfaces, SectionResult::Failed(_)));
     assert!(matches!(observation.addresses_v6, SectionResult::Failed(_)));
     assert!(matches!(observation.routes_v4, SectionResult::Failed(_)));
+    // A MISSING /proc/net/ipv6_route is a failed section, never an
+    // observed "no IPv6 routes": absence of the file is not evidence
+    // about the route table (WO-03 M4).
+    assert!(matches!(
+        observation.routes_v6,
+        SectionResult::Failed(ref error) if error.contains("cannot read")
+    ));
     assert_eq!(observation.state(), ProviderState::Unavailable);
 }
 
@@ -270,6 +386,7 @@ fn mac_observation_three_states_from_sysfs() {
     std::fs::create_dir_all(&proc).unwrap();
     std::fs::write(proc.join("route"), "").unwrap();
     std::fs::write(proc.join("if_inet6"), "").unwrap();
+    std::fs::write(proc.join("ipv6_route"), "").unwrap();
 
     let mut p = SysFsProvider::with_roots(&sys, tmp.join("proc"));
     let observation = observe(&mut p);
