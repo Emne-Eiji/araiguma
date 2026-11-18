@@ -71,7 +71,10 @@ case "$COMMAND" in
     ;;
   e2e)
     prepare
-    (cd "$WORK/apps/frontend" && npx --no-install vite build && npx --no-install playwright test)
+    (cd "$WORK/apps/frontend" \
+      && npx --no-install playwright install chromium \
+      && npx --no-install vite build \
+      && npx --no-install playwright test)
     ;;
   *)
     echo "frontend.sh: unknown command '$COMMAND' (prepare|check|test|build|e2e)" >&2
