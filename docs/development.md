@@ -51,6 +51,26 @@ needed) → update `types.ts` to match the new serde shape → run
 green. Keep serde renames in mind (camelCase fields, lowercase enums,
 `Other(u8)` variants serialize as `{"other": n}`).
 
+### Schema versions
+
+Documents carry `schemaVersion`. Writers emit the current version (see
+`SNAPSHOT_SCHEMA_VERSION` / `TOPOLOGY_SCHEMA_VERSION` in crates/core);
+readers accept older versions only where they are unambiguous — a v1
+snapshot is accepted only if every `macAddress` is a non-null string,
+because v1 `null` could mean either "no hardware address" or "not
+observed". When bumping a version: update the constant, document the
+change in its doc comment and in `docs/architecture.md`, and update
+fixtures + validators in the same commit.
+
+### Frontend document validation
+
+All document loading goes through the validated boundaries in
+`apps/frontend/src/lib/` (`snapshot.ts`, `topology.ts` on shared
+primitives in `validate.ts`). When the model changes, extend the
+validators and the malformed-document tests (`tests/validation.test.ts`)
+in the same commit — these loaders are the boundary WO-03's import
+workflow relies on.
+
 Regenerate sysfs/procfs fixture trees with `scripts/gen-sysfs-fixtures.sh`;
 `scripts/test-all.sh` verifies regeneration is stable (no uncommitted
 drift).
@@ -93,6 +113,21 @@ size check is part of the gate.
   rather than silently moving; free the port.
 - **netns tests fail with "unshare must be available"**: the environment
   must allow unprivileged user namespaces; this sandbox does.
+- **netns route setup fails with "Nexthop has invalid gateway"**: this
+  kernel installs connected routes only for addresses on UP interfaces —
+  bring the test interface up before adding addresses/routes.
 - **Budget exceeded** (`check-durable-size.sh` fails): inspect
   `scripts/disk-usage.sh`; the usual culprits are caches inside the
   persistent tree — everything regenerable belongs in /tmp.
+
+## Reading the Rust test counts
+
+The netns integration tests re-execute themselves under `unshare -Urn`
+with `--exact`, so each child prints its own "test result" line with a
+nonzero "filtered out" count. To count the workspace's tests
+deterministically, sum only the parent harness summaries (lines without
+a nonzero "filtered out") — `scripts/test-all.sh` does this
+automatically, and the declared count
+(`rg '#\[(tokio::)?test\]' crates -g '*.rs' | wc -l`) must equal it. A
+mismatch means a child was orphaned or a test skipped: investigate, never
+adjust the expectation.

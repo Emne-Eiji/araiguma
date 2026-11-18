@@ -54,6 +54,8 @@ future work); IPv6 routes therefore come only from netlink today.
 1. **Dummy and loopback report operstate UNKNOWN even when up.** An up dummy
    with an address is fully functional yet `operstate` is `unknown`. The UI
    displays this honestly ("unknown state") instead of dressing it up as up.
+   `lowerLayerDown` and `notPresent` are explicitly non-operational in every
+   view ("lower layer down" / "not present" with the down tone).
 2. **A full route dump includes the local table (255)** — local, broadcast,
    and anycast entries appear alongside main-table routes. The model keeps
    them (with `table: 255`); presentation filters by default but never
@@ -84,7 +86,37 @@ future work); IPv6 routes therefore come only from netlink today.
 8. **ARPHRD 65534 (NONE)** devices (wireguard, some tunnels) are
    unclassifiable from sysfs alone → `Virtual` + caveat note.
 9. **Interface classification precedence**: netlink `IFLA_INFO_KIND` >
-   sysfs wireless/bridge directories > ARPHRD.
+   sysfs wireless/bridge directories > ARPHRD. An `IFLA_INFO_KIND` string
+   that the model does **not** map is stronger evidence than ARPHRD: the
+   device is a specific (virtual) kind we do not recognize, so the raw
+   string is kept in `kind_detail`, the classification stays `Other` with
+   an explicit "classification uncertain" note, and the ARPHRD fallback is
+   deliberately not consulted (an unrecognized virtual device whose
+   hardware type is ARPHRD_ETHER would otherwise be confidently
+   misclassified as Ethernet). The fallback applies only when the kernel
+   exposed no kind string at all.
+10. **MAC address observation is three-state** (schema v2). Inside a
+    successfully dumped link message, an absent or empty `IFLA_ADDRESS` is
+    the kernel stating the device has **no** hardware address (wireguard,
+    ARPHRD_NONE devices) — an observed absence, not missing data. From
+    sysfs, an existing-but-empty `address` file is an observed absence; a
+    missing file means not observed. Verified live: loopback reports its
+    all-zero address as a real value (`Present("00:00:00:00:00:00")` — the
+    kernel's own claim, reported as-is), wireguard reports none.
+11. **Netlink receive-buffer overrun** (`ENOBUFS`): when notifications
+    arrive faster than the socket drains, the kernel drops messages and
+    the next receive returns ENOBUFS, which the netlink codec surfaces as
+    an `NLMSG_OVERRUN` message. Verified live inside a netns by starving
+    the reader with a 4000-operation batch: the monitor reports
+    `Resynchronized` (dropped events are unobserved) and the subscription
+    continues delivering fresh events afterwards.
+12. **This kernel (5.10) does not install the connected route for an
+    address on a DOWN interface**: `ip route add default via X dev Y` fails
+    with "Nexthop has invalid gateway" unless Y is up (or the address is
+    otherwise on-link). Discovered because a netns test violated this and
+    its failure was hidden by the old re-exec pattern (see the WO-02
+    correction closeout); tests now bring interfaces up before route
+    setup.
 
 ## Not observable (today, honestly reported as not observed)
 
