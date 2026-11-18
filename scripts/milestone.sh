@@ -38,12 +38,17 @@ fi
 branch="$(git branch --show-current)"
 [ "$branch" = "main" ] || { echo "FAIL: current branch is '$branch', expected 'main'" >&2; exit 1; }
 
+# 6. The durable-storage budget must hold BEFORE the artifacts are written
+#    (WO-02 correction §2: enforced on the working footprint and the
+#    persistent store separately).
+scripts/check-durable-size.sh
+
 COMMIT="$(git rev-parse HEAD)"
 BUNDLE="$OUT/araiguma-$NAME.bundle"
 TARBALL="$OUT/araiguma-$NAME.tar.gz"
 SHAFILE="$OUT/araiguma-$NAME.sha256"
 
-# 6. Write recovery artifacts.
+# 7. Write recovery artifacts.
 git bundle create "$BUNDLE" --all
 git archive --format=tar.gz --prefix="araiguma/" -o "$TARBALL" HEAD
 {
@@ -57,10 +62,15 @@ git archive --format=tar.gz --prefix="araiguma/" -o "$TARBALL" HEAD
   (cd "$OUT" && sha256sum "$(basename "$BUNDLE")" "$(basename "$TARBALL")")
 } > "$SHAFILE"
 
-# 7. Verify the artifacts are readable.
+# 8. Verify the artifacts are readable.
 git bundle verify "$BUNDLE" >/dev/null
 tar -tzf "$TARBALL" >/dev/null
 (cd "$OUT" && sha256sum -c "$(basename "$SHAFILE")" --quiet)
+
+# 9. The budget must STILL hold after the artifacts were written: recovery
+#    artifacts must not quietly consume the remaining persistent-store
+#    budget (the original repository loss was a budget overflow).
+scripts/check-durable-size.sh
 
 echo "milestone $NAME recorded:"
 echo "  commit $COMMIT ($(git rev-list --count HEAD) commits)"
