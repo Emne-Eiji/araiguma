@@ -3,6 +3,18 @@
 version = 4
 
 [[package]]
+name = "araiguma-cli"
+version = "0.1.0"
+dependencies = [
+ "araiguma-core",
+ "araiguma-netlink",
+ "araiguma-sysfs",
+ "log",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "araiguma-core"
 version = "0.1.0"
 dependencies = [
