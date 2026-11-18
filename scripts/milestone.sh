@@ -54,7 +54,7 @@ git archive --format=tar.gz --prefix="araiguma/" -o "$TARBALL" HEAD
   echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "identity: Emne <https://github.com/Emne-Eiji> (author and committer, all commits)"
   echo
-  sha256sum "$(basename "$BUNDLE")" "$(basename "$TARBALL")"
+  (cd "$OUT" && sha256sum "$(basename "$BUNDLE")" "$(basename "$TARBALL")")
 } > "$SHAFILE"
 
 # 7. Verify the artifacts are readable.
