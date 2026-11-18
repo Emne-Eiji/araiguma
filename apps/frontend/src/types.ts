@@ -161,3 +161,64 @@ export interface NetworkSnapshot {
   routes: Route[];
   providers: ProviderReport[];
 }
+
+// ── Topology documents (mirror of crates/core/src/topology.rs) ────────────
+
+export type NodeId =
+  | { interface: { ifindex: number } }
+  | { gateway: { address: string } };
+
+export type TopologyNodeKind = 'interface' | 'gateway';
+
+export type TopologyNodeState = 'active' | 'inactive' | 'unknown';
+
+export type TopologyEdgeKind =
+  | 'bridgeMember'
+  | 'linkParent'
+  | 'gatewayRoute'
+  | 'gatewayInferred';
+
+export type Evidence =
+  | { observed: { source: ObservationSource } }
+  | { inferred: { reason: string } };
+
+export interface NodeDetail {
+  ifindex: number | null;
+  addresses: Address[];
+  macAddress: string | null;
+  mtu: number | null;
+  operState: OperState | null;
+  adminState: AdminState | null;
+  masterIfindex: number | null;
+  parentIfindex: number | null;
+  routesUsing: number;
+  defaultRoutes: number;
+  sources: ObservationSource[];
+  notes: string[];
+}
+
+export interface TopologyNode {
+  id: NodeId;
+  label: string;
+  nodeKind: TopologyNodeKind;
+  interfaceKind: InterfaceKind | null;
+  kindDetail: string | null;
+  state: TopologyNodeState;
+  annotations: string[];
+  detail: NodeDetail;
+}
+
+export interface TopologyEdge {
+  from: NodeId;
+  to: NodeId;
+  edgeKind: TopologyEdgeKind;
+  evidence: Evidence;
+  detail: string | null;
+}
+
+export interface TopologyDocument {
+  schemaVersion: number;
+  sourceTimestampMs: number;
+  nodes: TopologyNode[];
+  edges: TopologyEdge[];
+}

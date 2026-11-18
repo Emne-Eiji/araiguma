@@ -1,6 +1,5 @@
 <script lang="ts">
-  // Narrow icon-led navigation rail. 56px wide, expandable later; today it
-  // carries the views that exist (Overview) — no speculative placeholders.
+  // Narrow icon-led navigation rail. 56px wide, expandable later.
 
   let {
     active = 'overview',
@@ -9,6 +8,13 @@
     active?: string;
     onnavigate?: (view: string) => void;
   } = $props();
+
+  const items = [
+    { id: 'overview', label: 'Overview', testid: 'nav-overview' },
+    { id: 'topology', label: 'Topology', testid: 'nav-topology' },
+    { id: 'routes', label: 'Routes', testid: 'nav-routes' },
+    { id: 'providers', label: 'Provider status', testid: 'nav-providers' },
+  ];
 </script>
 
 <nav class="rail" aria-label="Primary navigation">
@@ -23,23 +29,49 @@
     </svg>
   </div>
 
-  <button
-    class="item"
-    class:active={active === 'overview'}
-    data-testid="nav-overview"
-    title="Overview"
-    aria-label="Overview"
-    aria-current={active === 'overview' ? 'page' : undefined}
-    onclick={() => onnavigate('overview')}
-  >
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
-      stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
-      <rect x="4" y="4" width="7" height="7" rx="1.5" />
-      <rect x="13" y="4" width="7" height="7" rx="1.5" />
-      <rect x="4" y="13" width="7" height="7" rx="1.5" />
-      <rect x="13" y="13" width="7" height="7" rx="1.5" />
-    </svg>
-  </button>
+  {#each items as item (item.id)}
+    <button
+      class="item"
+      class:active={active === item.id}
+      data-testid={item.testid}
+      title={item.label}
+      aria-label={item.label}
+      aria-current={active === item.id ? 'page' : undefined}
+      onclick={() => onnavigate(item.id)}
+    >
+      {#if item.id === 'overview'}
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+          stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+          <rect x="4" y="4" width="7" height="7" rx="1.5" />
+          <rect x="13" y="4" width="7" height="7" rx="1.5" />
+          <rect x="4" y="13" width="7" height="7" rx="1.5" />
+          <rect x="13" y="13" width="7" height="7" rx="1.5" />
+        </svg>
+      {:else if item.id === 'topology'}
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+          stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+          <circle cx="6" cy="18" r="2.6" />
+          <circle cx="18" cy="18" r="2.6" />
+          <circle cx="12" cy="6" r="2.6" />
+          <path d="M10.5 8.2 7.3 15.6M13.5 8.2l3.2 7.4M8.6 18h6.8" />
+        </svg>
+      {:else if item.id === 'routes'}
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+          stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+          <path d="M5 19c0-6 3.5-9 7.5-9 3 0 5.5 2 6.5 5" />
+          <circle cx="5" cy="19" r="1.9" />
+          <path d="M19 15l1.6 1.4L22.4 13" />
+          <path d="M5 19h14" stroke-dasharray="2 3" opacity="0.45" />
+        </svg>
+      {:else if item.id === 'providers'}
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+          stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+          <path d="M12 3.5 20 8v8l-8 4.5L4 16V8z" />
+          <path d="M4 8l8 4.5L20 8M12 12.5V20.5" />
+        </svg>
+      {/if}
+    </button>
+  {/each}
 </nav>
 
 <style>
