@@ -91,6 +91,65 @@ test('routes view defaults to the main table with an explicit filter', async ({ 
   await expect(table.locator('td[title*="no gateway"]').first()).toBeVisible();
 });
 
+test('route details expose flags, notes, sources, and limitations', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('nav-routes').click();
+
+  const rows = page.getByTestId('routes-table').locator('tbody tr');
+
+  // The multipath-marked default carries the row marker (the limitation is
+  // discoverable from the table itself).
+  const markedRow = rows.filter({ has: page.locator('.note-badge') });
+  await expect(markedRow).toHaveCount(1);
+
+  // Rows are keyboard-operable: focus a row and press Enter.
+  const target = markedRow.first();
+  await target.focus();
+  await target.press('Enter');
+  const panel = page.getByTestId('route-details');
+  await expect(panel).toBeVisible();
+
+  // The panel shows the full metadata the table cannot fit: flags,
+  // provenance, the observation note stating the incomplete multipath
+  // representation, and an explicit warning that this observation is
+  // limited.
+  await expect(panel.getByTestId('route-flags')).toBeVisible();
+  await expect(panel.getByTestId('route-flags')).toContainText('none set');
+  await expect(panel.getByTestId('route-sources')).toContainText('netlink');
+  await expect(panel.getByTestId('route-notes')).toContainText(
+    /multipath route with 2 next hops; only the first is represented/,
+  );
+  await expect(panel.getByTestId('route-limitation-warning')).toBeVisible();
+
+  // The workspace is not permanently narrowed (overlay panel).
+  const widthDuring = await page
+    .locator('.workspace')
+    .evaluate((el) => el.getBoundingClientRect().width);
+  expect(Math.round(widthDuring)).toBeGreaterThanOrEqual(900);
+
+  // Close, then open a route that carries real flag values (the default
+  // via the down wireless interface carries the kernel's linkdown flag).
+  await panel.getByRole('button', { name: 'Close route details' }).click();
+  await expect(panel).not.toBeVisible();
+  const linkdownRow = rows.filter({ hasText: 'wlp3s0' }).first();
+  await linkdownRow.click();
+  await expect(panel).toBeVisible();
+  await expect(panel.getByTestId('route-flags')).toContainText('linkdown');
+  await panel.getByRole('button', { name: 'Close route details' }).click();
+  await expect(rows).toHaveCount(8);
+
+  // Space also selects (keyboard parity with pointer clicks).
+  await rows.first().focus();
+  await rows.first().press(' ');
+  await expect(page.getByTestId('route-details')).toBeVisible();
+  // Accessible labels exist on every operable row.
+  const labels = await page.getByTestId('routes-table').locator('tbody tr').evaluateAll(
+    (trs) => trs.map((tr) => (tr as HTMLElement).getAttribute('aria-label') ?? ''),
+  );
+  expect(labels.every((l) => l.length > 0)).toBe(true);
+  expect(labels.some((l) => l.includes('multipath') === false && l.includes('route'))).toBe(true);
+});
+
 test('provider status view reports both providers honestly', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('nav-providers').click();

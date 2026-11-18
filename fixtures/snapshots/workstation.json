@@ -239,7 +239,9 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [
+        "multipath route with 2 next hops; only the first is represented"
+      ]
     },
     {
       "family": "ipv4",
@@ -255,7 +257,9 @@
       "routeType": "unicast",
       "metric": 600,
       "table": 254,
-      "flags": [],
+      "flags": [
+        "linkdown"
+      ],
       "sources": [
         "netlink"
       ],

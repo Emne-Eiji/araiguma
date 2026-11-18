@@ -7,6 +7,7 @@
   import TopologyView from './components/TopologyView.svelte';
   import TopologyDetails from './components/TopologyDetails.svelte';
   import RoutesView from './components/RoutesView.svelte';
+  import RouteDetails from './components/RouteDetails.svelte';
   import ProvidersView from './components/ProvidersView.svelte';
   import DetailsPanel from './components/DetailsPanel.svelte';
 
@@ -77,6 +78,12 @@
       node={selectedNode}
       document={topologyDocument}
       onclose={() => (selectedNode = null)}
+    />
+  {/if}
+  {#if view === 'routes' && selectedRoute}
+    <RouteDetails
+      route={selectedRoute}
+      onclose={() => (selectedRoute = null)}
     />
   {/if}
 </div>

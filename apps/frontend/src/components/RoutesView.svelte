@@ -1,7 +1,13 @@
 <script lang="ts">
   import type { NetworkSnapshot, Route } from '../types';
   import { formatGateway, formatIpNet, formatProtocol } from '../lib/format';
-  import { routeKey, tableOptions, visibleRoutes, MAIN_TABLE } from '../lib/routes';
+  import {
+    routeAriaLabel,
+    routeKey,
+    tableOptions,
+    visibleRoutes,
+    MAIN_TABLE,
+  } from '../lib/routes';
   import MockBadge from './MockBadge.svelte';
 
   let {
@@ -27,6 +33,19 @@
     selectedTables = selectedTables.includes(table)
       ? selectedTables.filter((t) => t !== table)
       : [...selectedTables, table].sort((a, b) => a - b);
+  }
+
+  function toggleRoute(route: Route) {
+    onselect(selectedRoute === route ? null : route);
+  }
+
+  // WO-02 correction §9.4: route rows are operable by keyboard alone —
+  // Enter and Space select exactly like a pointer click.
+  function onRowKeydown(event: KeyboardEvent, route: Route) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggleRoute(route);
+    }
   }
 
   function scopeLabel(route: Route): string {
@@ -102,9 +121,23 @@
             <tr
               class:selected={selectedRoute === route}
               class:default-route={route.destination !== null && route.destination.prefixLen === 0}
-              onclick={() => onselect(selectedRoute === route ? null : route)}
+              class:has-notes={route.notes.length > 0}
+              tabindex="0"
+              role="button"
+              aria-label={routeAriaLabel(route)}
+              aria-pressed={selectedRoute === route}
+              data-testid="route-row"
+              onclick={() => toggleRoute(route)}
+              onkeydown={(event) => onRowKeydown(event, route)}
             >
               <td class="mono dest">
+                {#if route.notes.length > 0}
+                  <span
+                    class="note-badge"
+                    title="This route carries observation notes — open the details for the full picture (e.g. a multipath route currently represented by its first next hop only)"
+                    aria-hidden="true"
+                  >!</span>
+                {/if}
                 {#if route.destination === null}
                   <span title="destination not observed">—</span>
                 {:else if route.destination.prefixLen === 0}
@@ -139,9 +172,9 @@
     </div>
     {#if selectedRoute}
       <p class="selection-note" data-testid="route-selection-note">
-        Route selected — switch to <strong>Topology</strong> to see its
-        interface and gateway highlighted (highlight only; nothing is
-        modified).
+        Route selected — full flags, notes, and provenance are in the details
+        panel; switch to <strong>Topology</strong> to see its interface and
+        gateway highlighted (highlight only; nothing is modified).
       </p>
     {/if}
   {/if}
@@ -277,6 +310,30 @@
 
   tr.default-route {
     background: color-mix(in srgb, var(--accent) 4%, transparent);
+  }
+
+  /* Rows with observation notes (e.g. the multipath first-hop-only
+     representation) are marked so the limitation is discoverable from the
+     table itself — not only in the details panel. */
+  tr.has-notes .note-badge {
+    display: inline-grid;
+    place-items: center;
+    width: 14px;
+    height: 14px;
+    margin-right: 6px;
+    border-radius: 50%;
+    border: 1px solid color-mix(in srgb, var(--state-unknown) 70%, transparent);
+    color: var(--state-unknown);
+    background: color-mix(in srgb, var(--state-unknown) 14%, transparent);
+    font-size: 10px;
+    font-weight: 700;
+    vertical-align: middle;
+  }
+
+  /* Keyboard focus is always visible on operable rows. */
+  tbody tr:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .family {

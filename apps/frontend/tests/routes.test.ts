@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { MAIN_TABLE, tableOptions, visibleRoutes } from '../src/lib/routes';
+import {
+  MAIN_TABLE,
+  routeAriaLabel,
+  routeHasLimitationNotes,
+  tableOptions,
+  visibleRoutes,
+} from '../src/lib/routes';
 import { fixtures } from '../src/lib/fixtures';
 import type { NetworkSnapshot, Route } from '../src/types';
 
 function snapshotWith(routes: Route[], providers = fixtures.workstation.snapshot.providers): NetworkSnapshot {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     timestampMs: 0,
     interfaces: fixtures.workstation.snapshot.interfaces,
     addresses: fixtures.workstation.snapshot.addresses,
@@ -69,5 +75,61 @@ describe('route missing-field semantics', () => {
   it('a gateway-less default stays gateway-less (on-link observation)', () => {
     const server = fixtures.workstation.snapshot; // placeholder for import shape
     expect(server.routes.some((r) => r.gateway === null)).toBe(true);
+  });
+});
+
+describe('route accessibility and limitation markers (WO-02 correction §4/§9.4)', () => {
+  const base: Route = {
+    family: 'ipv4',
+    destination: { address: '0.0.0.0', prefixLen: 0 },
+    gateway: '192.168.1.1',
+    outputInterface: 2,
+    outputInterfaceName: 'eth0',
+    protocol: 'dhcp',
+    scope: 'universe',
+    routeType: 'unicast',
+    metric: 100,
+    table: 254,
+    flags: ['onlink'],
+    sources: ['netlink', 'procfs'],
+    notes: [],
+  };
+
+  it('builds an accessible label with the row facts', () => {
+    expect(routeAriaLabel(base)).toBe(
+      'default route via 192.168.1.1 on eth0, ipv4, table 254',
+    );
+  });
+
+  it('the label announces on-link, unobserved fields, and notes', () => {
+    const onlink: Route = { ...base, gateway: null, notes: ['a note'] };
+    expect(routeAriaLabel(onlink)).toBe(
+      'default route on-link on eth0, ipv4, table 254, carries 1 observation note — open details for limitations',
+    );
+    const unknown: Route = {
+      ...base,
+      destination: null,
+      outputInterface: null,
+      outputInterfaceName: null,
+    };
+    expect(routeAriaLabel(unknown)).toContain('destination not observed');
+    expect(routeAriaLabel(unknown)).toContain('output interface not observed');
+  });
+
+  it('marks routes whose observation is explicitly incomplete', () => {
+    expect(routeHasLimitationNotes(base)).toBe(false);
+    const multipath: Route = {
+      ...base,
+      notes: ['multipath route with 2 next hops; only the first is represented'],
+    };
+    expect(routeHasLimitationNotes(multipath)).toBe(true);
+  });
+
+  it('the workstation fixture covers the limitation-marker path', () => {
+    // One synthetic default is a multipath route whose representation is
+    // incomplete today — the UI must be able to show that honestly.
+    const marked = fixtures.workstation.snapshot.routes.filter(routeHasLimitationNotes);
+    expect(marked.length).toBe(1);
+    expect(marked[0].notes[0]).toMatch(/multipath route with 2 next hops/);
   });
 });

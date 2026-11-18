@@ -70,3 +70,37 @@ export function routeKey(route: Route, index: number): string {
     index,
   ].join('|');
 }
+
+// Accessible summary of a route row for screen readers and keyboard
+// navigation (WO-02 correction §9.4): the same facts the visual row shows,
+// plus a hint that observation notes exist when they do.
+export function routeAriaLabel(route: Route): string {
+  const destination =
+    route.destination === null
+      ? 'destination not observed'
+      : route.destination.prefixLen === 0
+        ? 'default route'
+        : `route ${route.destination.address}/${route.destination.prefixLen}`;
+  const gateway =
+    route.gateway === null ? 'on-link' : `via ${route.gateway}`;
+  const output =
+    route.outputInterfaceName !== null
+      ? `on ${route.outputInterfaceName}`
+      : route.outputInterface !== null
+        ? `on interface ${route.outputInterface}`
+        : 'output interface not observed';
+  const table = route.table ?? MAIN_TABLE;
+  const notes =
+    route.notes.length > 0
+      ? `, carries ${route.notes.length} observation note${route.notes.length === 1 ? '' : 's'} — open details for limitations`
+      : '';
+  return `${destination} ${gateway} ${output}, ${route.family}, table ${table}${notes}`;
+}
+
+// Whether a route's observation is explicitly incomplete (provider notes
+// such as the current multipath first-hop-only representation). Surfaced as
+// a row marker and a details-panel warning so a partial representation can
+// never be mistaken for a complete one (WO-02 correction §4/§9.6).
+export function routeHasLimitationNotes(route: Route): boolean {
+  return route.notes.length > 0;
+}
