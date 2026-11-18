@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { NetworkSnapshot, SectionReport } from '../types';
   import { providerStateLabel } from '../lib/format';
-  import MockBadge from './MockBadge.svelte';
+  import DataBadge from './DataBadge.svelte';
 
   let { snapshot }: { snapshot: NetworkSnapshot } = $props();
 
@@ -56,7 +56,7 @@
         cannot provide — no invented health facts.
       </p>
     </div>
-    <MockBadge />
+    <DataBadge />
   </header>
 
   {#each snapshot.providers as report (report.provider)}

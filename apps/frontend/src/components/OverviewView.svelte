@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { NetworkSnapshot } from '../types';
-  import MockBadge from './MockBadge.svelte';
+  import DataBadge from './DataBadge.svelte';
   import InterfaceCard from './InterfaceCard.svelte';
 
   let {
@@ -23,7 +23,7 @@
         {snapshot.routes.length} routes
       </p>
     </div>
-    <MockBadge />
+    <DataBadge />
   </header>
 
   {#if snapshot.interfaces.length === 0}

@@ -6,7 +6,7 @@
   import cytoscape from 'cytoscape';
   import type { NodeId, TopologyDocument, TopologyNode } from '../types';
   import { nodeIdKey } from '../lib/topology';
-  import MockBadge from './MockBadge.svelte';
+  import DataBadge from './DataBadge.svelte';
 
   let {
     document,
@@ -193,7 +193,7 @@
         relationships without evidence are not drawn
       </p>
     </div>
-    <MockBadge />
+    <DataBadge />
   </header>
 
   {#if document.nodes.length === 0}

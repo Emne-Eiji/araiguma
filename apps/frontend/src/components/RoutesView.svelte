@@ -8,7 +8,7 @@
     visibleRoutes,
     MAIN_TABLE,
   } from '../lib/routes';
-  import MockBadge from './MockBadge.svelte';
+  import DataBadge from './DataBadge.svelte';
 
   let {
     snapshot,
@@ -70,7 +70,7 @@
         {/if}
       </p>
     </div>
-    <MockBadge />
+    <DataBadge />
   </header>
 
   <div class="filter-row" role="group" aria-label="Routing table filter">

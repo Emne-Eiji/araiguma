@@ -105,6 +105,12 @@ frontend_audit()    {
 }
 dbus_harness()      { scripts/check-dbus-harness.sh; }
 live_observation()  { scripts/live-check.sh 2>&1 | tail -n 20; }
+frontend_live_docs() {
+  # WO-03 M1 integration: the real CLI documents exported by the live
+  # step must import cleanly through the actual frontend validators.
+  [ -d /tmp/araiguma-live-docs ] || { echo "no live documents exported" >&2; return 1; }
+  ARAIGUMA_LIVE_DOCS=/tmp/araiguma-live-docs scripts/frontend.sh test 2>&1 | tail -n 6
+}
 git_identity() {
   local problems=""
   [ "$(git config user.name)" = "Emne" ] || problems+="user.name wrong; "
@@ -136,6 +142,7 @@ step "playwright e2e" frontend_e2e
 step "npm audit" frontend_audit
 step "private D-Bus harness check" dbus_harness
 step "live observation + iproute2 cross-validation" live_observation
+step "live CLI documents through the frontend validators" frontend_live_docs
 step "git identity audit" git_identity
 
 echo

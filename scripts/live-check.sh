@@ -80,5 +80,18 @@ changed_lines="$(grep -c '"event":"changed"' /tmp/live-watch.out || true)"
 [ -s /tmp/live-watch.err ] && { echo "--- watch stderr ---"; cat /tmp/live-watch.err; }
 echo "live-check: PASS — watch emitted a snapshot event and $changed_lines change events"
 
+# --- documents for the frontend import integration (WO-03 M1) ---------------
+# A real CLI-produced snapshot plus its projected topology document, left
+# for the gate's frontend step to parse with the actual frontend
+# validators (see tests/live-document.test.ts and scripts/test-all.sh).
+rm -rf /tmp/araiguma-live-docs
+mkdir -p /tmp/araiguma-live-docs
+"$BIN" snapshot > /tmp/araiguma-live-docs/live-snapshot.json \
+  || fail "snapshot export for the frontend failed"
+"$BIN" topology --input /tmp/araiguma-live-docs/live-snapshot.json \
+  > /tmp/araiguma-live-docs/live-topology.json \
+  || fail "topology projection for the frontend failed"
+
+echo "live-check: PASS — CLI snapshot + topology documents exported for frontend validation"
 echo "live-check: ALL LIVE CHECKS PASSED (inside a transient network namespace)"
 NETNS

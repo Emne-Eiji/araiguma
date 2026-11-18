@@ -1,12 +1,19 @@
 <script lang="ts">
-  // Narrow icon-led navigation rail. 56px wide, expandable later.
+  // Narrow icon-led navigation rail. 56px wide. The bottom section carries
+  // the data source controls (WO-03 M1): import an observation document,
+  // and — when imported documents are shown — return to the synthetic
+  // demonstration data.
+
+  import { dataSource, importFile, returnToMock } from '../lib/dataMode.svelte';
 
   let {
     active = 'overview',
     onnavigate = (_view: string) => {},
+    onimporterror = (_message: string) => {},
   }: {
     active?: string;
     onnavigate?: (view: string) => void;
+    onimporterror?: (message: string) => void;
   } = $props();
 
   const items = [
@@ -15,6 +22,22 @@
     { id: 'routes', label: 'Routes', testid: 'nav-routes' },
     { id: 'providers', label: 'Provider status', testid: 'nav-providers' },
   ];
+
+  let fileInput = $state<HTMLInputElement>();
+
+  async function onFileChosen(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    // Reset the value so choosing the same file again re-triggers.
+    input.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      importFile(file.name, text);
+    } catch (error) {
+      onimporterror(`${file.name}: ${(error as Error).message}`);
+    }
+  }
 </script>
 
 <nav class="rail" aria-label="Primary navigation">
@@ -72,6 +95,48 @@
       {/if}
     </button>
   {/each}
+
+  <div class="spacer"></div>
+
+  <input
+    type="file"
+    accept=".json,application/json"
+    class="file-input"
+    data-testid="import-file-input"
+    bind:this={fileInput}
+    onchange={onFileChosen}
+    aria-hidden="true"
+    tabindex="-1"
+  />
+  <button
+    class="item import"
+    data-testid="nav-import"
+    title="Import an observation document (araiguma snapshot / topology JSON)"
+    aria-label="Import an observation document"
+    onclick={() => fileInput?.click()}
+  >
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+      stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+      <path d="M12 15V4" />
+      <path d="M8 8l4-4 4 4" />
+      <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+    </svg>
+  </button>
+  {#if dataSource.mode === 'imported'}
+    <button
+      class="item"
+      data-testid="nav-return-mock"
+      title="Return to the synthetic demonstration data"
+      aria-label="Return to the synthetic demonstration data"
+      onclick={() => returnToMock()}
+    >
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+        stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+        <path d="M4 12a8 8 0 1 1 2.3 5.6" />
+        <path d="M4 18v-5h5" />
+      </svg>
+    </button>
+  {/if}
 </nav>
 
 <style>
@@ -110,8 +175,26 @@
     color: var(--text-primary);
   }
 
+  .item:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
   .item.active {
     background: color-mix(in srgb, var(--accent) 14%, transparent);
     color: var(--accent);
+  }
+
+  .spacer {
+    flex: 1;
+  }
+
+  .import {
+    color: var(--accent-blue);
+    border: 1px dashed color-mix(in srgb, var(--accent-blue) 55%, transparent);
+  }
+
+  .file-input {
+    display: none;
   }
 </style>

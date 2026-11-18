@@ -208,3 +208,80 @@ test('test instrumentation is inert in the production build', async ({ page }) =
   );
   expect(plain).toBe(false);
 });
+
+// WO-03 M1: importing actual observation documents into the frontend.
+
+import workstationSnapshot from '../../../fixtures/snapshots/workstation.json' with { type: 'json' };
+import serverTunnelSnapshot from '../../../fixtures/snapshots/server-tunnel.json' with { type: 'json' };
+import workstationTopology from '../../../fixtures/topology/workstation.json' with { type: 'json' };
+
+test('import workflow: snapshot and topology documents, provenance, and return to mock', async ({
+  page,
+}) => {
+  await page.goto('/');
+  // Mock mode: badge and provenance line.
+  await expect(page.getByTestId('mock-badge')).toBeVisible();
+  await expect(page.getByTestId('data-provenance')).toContainText('Synthetic demonstration data');
+
+  // Import a snapshot through the file input.
+  await page.getByTestId('import-file-input').setInputFiles({
+    name: 'real-snapshot.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(serverTunnelSnapshot)),
+  });
+  await expect(page.getByTestId('imported-badge')).toBeVisible();
+  await expect(page.getByTestId('data-provenance')).toContainText('real-snapshot.json');
+  await expect(page.getByTestId('data-provenance')).toContainText('not a live connection');
+  // The snapshot drives the views: server-tunnel has ens3+tun0, no wlp3s0.
+  await expect(page.getByTestId('iface-card-tun0')).toBeVisible();
+  await expect(page.getByTestId('iface-card-wlp3s0')).toHaveCount(0);
+
+  // The topology view has no imported document yet: an explicit notice,
+  // never blank and never silently-substituted mock data.
+  await page.getByTestId('nav-topology').click();
+  await expect(page.getByTestId('missing-topology-notice')).toBeVisible();
+  await expect(page.getByTestId('data-provenance')).toContainText('topology');
+
+  // Import the topology document too; the view renders it.
+  await page.getByTestId('import-file-input').setInputFiles({
+    name: 'real-topology.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(workstationTopology)),
+  });
+  await expect(page.getByTestId('missing-topology-notice')).toHaveCount(0);
+  const canvas = page.getByTestId('topology-canvas');
+  await expect(canvas).toBeVisible();
+
+  // An invalid import is rejected with a visible reason and leaves the
+  // valid imported state intact.
+  await page.getByTestId('import-file-input').setInputFiles({
+    name: 'broken.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from('{"schemaVersion": 2, "interfaces": "not-an-array"}'),
+  });
+  const error = page.getByTestId('import-error');
+  await expect(error).toBeVisible();
+  await expect(error).toContainText('broken.json');
+  await expect(page.getByTestId('topology-canvas')).toBeVisible();
+
+  // Returning to the demonstration data is explicit and works.
+  await page.getByTestId('nav-return-mock').click();
+  await expect(page.getByTestId('mock-badge')).toBeVisible();
+  await page.getByTestId('nav-overview').click();
+  await expect(page.getByTestId('iface-card-wlp3s0')).toBeVisible();
+});
+
+test('import workflow: an unsupported schema version is rejected with the reason', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const bad = { ...(workstationSnapshot as object), schemaVersion: 99 };
+  await page.getByTestId('import-file-input').setInputFiles({
+    name: 'future.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(bad)),
+  });
+  await expect(page.getByTestId('import-error')).toContainText('schema version');
+  // Still mock mode; nothing was partially applied.
+  await expect(page.getByTestId('mock-badge')).toBeVisible();
+});
