@@ -6,8 +6,8 @@ use std::net::{IpAddr, Ipv4Addr};
 use araiguma_core::merge::merge;
 use araiguma_core::model::{
     Address, AddressFamily, AddressScope, AdminState, Interface, InterfaceKind, IpNet,
-    MacObservation, ObservationSource, OperState, Route, RouteProtocol, RouteScope, RouteType,
-    RT_TABLE_LOCAL, RT_TABLE_MAIN,
+    MacObservation, NextHop, NextHops, ObservationSource, OperState, Route, RouteProtocol,
+    RouteScope, RouteType, RT_TABLE_LOCAL, RT_TABLE_MAIN,
 };
 use araiguma_core::provider::{ProviderId, ProviderObservation, SectionResult};
 
@@ -43,6 +43,7 @@ fn v4_route(dst: &str, prefix: u8, gateway: Option<IpAddr>, oif: Option<u32>) ->
         metric: Some(0),
         table: Some(RT_TABLE_MAIN as u32),
         flags: None,
+        next_hops: NextHops::Single,
         sources: vec![],
         notes: vec![],
     }
@@ -279,6 +280,7 @@ fn v6_route(dst: &str, prefix: u8, gateway: Option<IpAddr>, oif: Option<u32>) ->
         metric: Some(0),
         table: Some(RT_TABLE_MAIN as u32),
         flags: None,
+        next_hops: NextHops::Single,
         sources: vec![],
         notes: vec![],
     }
@@ -557,4 +559,165 @@ fn mac_observation_present_survives_lower_priority_absent() {
         snapshot.interfaces[0].mac_address,
         MacObservation::Present("52:54:00:12:34:56".into())
     );
+}
+
+// ── Multipath merge semantics (WO-03 M3) ────────────────────────────────────
+
+fn hop(gateway: Option<IpAddr>, oif: Option<u32>, weight: Option<u16>) -> NextHop {
+    NextHop {
+        gateway,
+        output_interface: oif,
+        output_interface_name: None,
+        weight,
+        flags: Some(vec![]),
+    }
+}
+
+fn multipath_route(dst: &str, prefix: u8, hops: Vec<NextHop>) -> Route {
+    Route {
+        family: AddressFamily::Ipv4,
+        destination: Some(IpNet::new(dst.parse().unwrap(), prefix)),
+        gateway: None,
+        output_interface: None,
+        output_interface_name: None,
+        protocol: Some(RouteProtocol::Static),
+        scope: Some(RouteScope::Universe),
+        route_type: Some(RouteType::Unicast),
+        metric: Some(0),
+        table: Some(254),
+        flags: Some(vec![]),
+        next_hops: NextHops::Multi(hops),
+        sources: vec![ObservationSource::Netlink],
+        notes: vec![],
+    }
+}
+
+#[test]
+fn multipath_route_deduplicates_against_procfs_first_hop_view() {
+    // Verified live: /proc/net/route shows only the FIRST hop of a
+    // multipath route. The procfs line must merge into the netlink
+    // multipath observation (provenance united), not appear as a separate
+    // route — and the hop set must survive intact.
+    let mut netlink = observation(ProviderId::Netlink, 0);
+    netlink.interfaces = SectionResult::Observed(vec![
+        iface(2, "eth0", InterfaceKind::Ethernet),
+        iface(3, "eth1", InterfaceKind::Ethernet),
+    ]);
+    let multi = multipath_route(
+        "10.9.0.0",
+        24,
+        vec![
+            hop(Some("10.0.0.1".parse().unwrap()), Some(2), Some(2)),
+            hop(Some("10.1.0.1".parse().unwrap()), Some(3), Some(3)),
+        ],
+    );
+    netlink.routes_v4 = SectionResult::Observed(vec![multi]);
+
+    let mut sysfs = observation(ProviderId::SysFs, 1);
+    sysfs.interfaces = SectionResult::Observed(vec![
+        iface(2, "eth0", InterfaceKind::Ethernet),
+        iface(3, "eth1", InterfaceKind::Ethernet),
+    ]);
+    let mut proc_view = v4_route("10.9.0.0", 24, None, None);
+    proc_view.gateway = Some("10.0.0.1".parse().unwrap());
+    proc_view.output_interface_name = Some("eth0".into());
+    proc_view.table = Some(254);
+    proc_view.sources = vec![ObservationSource::ProcFs];
+    proc_view.notes =
+        vec!["table implied: /proc/net/route exposes only the main table (254)".into()];
+    sysfs.routes_v4 = SectionResult::Observed(vec![proc_view]);
+
+    let snapshot = merge(vec![netlink, sysfs], 1);
+    assert_eq!(snapshot.routes.len(), 1, "one kernel route, not two");
+    let merged = &snapshot.routes[0];
+    assert_eq!(
+        merged.sources,
+        vec![ObservationSource::Netlink, ObservationSource::ProcFs]
+    );
+    // The full hop set survives; route-level gateway/oif stay None.
+    match &merged.next_hops {
+        NextHops::Multi(hops) => {
+            assert_eq!(hops.len(), 2);
+            assert_eq!(hops[0].gateway.unwrap().to_string(), "10.0.0.1");
+            assert_eq!(hops[0].output_interface, Some(2));
+            assert_eq!(hops[0].weight, Some(2));
+            assert_eq!(hops[1].gateway.unwrap().to_string(), "10.1.0.1");
+            assert_eq!(hops[1].output_interface, Some(3));
+            // Hop names are enriched through the merged interface list.
+            assert_eq!(hops[0].output_interface_name.as_deref(), Some("eth0"));
+            assert_eq!(hops[1].output_interface_name.as_deref(), Some("eth1"));
+        }
+        other => panic!("hop set must survive the merge: {other:?}"),
+    }
+    assert_eq!(merged.gateway, None, "hops carry the gateways");
+    assert_eq!(merged.output_interface, None);
+}
+
+#[test]
+fn single_path_routes_with_different_gateways_stay_separate() {
+    let snapshot = routes_snapshot(vec![
+        {
+            let mut a = v4_route("10.9.0.0", 24, None, Some(2));
+            a.gateway = Some("10.0.0.1".parse().unwrap());
+            a
+        },
+        {
+            let mut b = v4_route("10.9.0.0", 24, None, Some(3));
+            b.gateway = Some("10.1.0.1".parse().unwrap());
+            b
+        },
+    ]);
+    assert_eq!(
+        snapshot.routes.len(),
+        2,
+        "different ECMP members, different routes"
+    );
+}
+
+#[test]
+fn multipath_routes_with_different_hop_sets_stay_separate() {
+    let snapshot = routes_snapshot(vec![
+        multipath_route(
+            "10.9.0.0",
+            24,
+            vec![
+                hop(Some("10.0.0.1".parse().unwrap()), Some(2), Some(1)),
+                hop(Some("10.1.0.1".parse().unwrap()), Some(3), Some(1)),
+            ],
+        ),
+        multipath_route(
+            "10.9.0.0",
+            24,
+            vec![
+                hop(Some("10.2.0.1".parse().unwrap()), Some(4), Some(1)),
+                hop(Some("10.3.0.1".parse().unwrap()), Some(5), Some(1)),
+            ],
+        ),
+    ]);
+    assert_eq!(
+        snapshot.routes.len(),
+        2,
+        "different multipath routes on the same prefix stay separate"
+    );
+}
+
+#[test]
+fn no_next_hop_is_silently_discarded_in_the_merge() {
+    // A multipath observation arriving at a lower priority than a
+    // single-path one for the same hop still replaces the representation
+    // (single -> multi upgrade keeps every hop).
+    let mut netlink = observation(ProviderId::Netlink, 0);
+    netlink.routes_v4 = SectionResult::Observed(vec![multipath_route(
+        "10.9.0.0",
+        24,
+        vec![
+            hop(Some("10.0.0.1".parse().unwrap()), Some(2), Some(2)),
+            hop(Some("10.1.0.1".parse().unwrap()), Some(3), Some(3)),
+        ],
+    )]);
+    let snapshot = merge(vec![netlink], 1);
+    match &snapshot.routes[0].next_hops {
+        NextHops::Multi(hops) => assert_eq!(hops.len(), 2),
+        other => panic!("both hops preserved: {other:?}"),
+    }
 }

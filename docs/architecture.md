@@ -54,8 +54,13 @@ synthetic fixtures; later: CLI output).
 - `Option<T>` on a field means **not observed by any provider**. It is never
   interpreted as a negative fact.
 - Documented exceptions where a missing value is itself an observation:
-  - `Route::gateway == None` on an observed route means the kernel reported
-    **no gateway** (an on-link route).
+  - `Route::gateway == None` on an observed **single-path** route means the
+    kernel reported **no gateway** (an on-link route).
+  - `Route::next_hops == Multi(hops)` (WO-03 M3): the route-level
+    `gateway`/`output_interface` are `None` **by design** — every hop
+    carries its own; multiple hops are never flattened into one gateway.
+    `Undecoded(reason)` keeps a kernel multipath attribute that could not
+    be decoded as an explicit marker instead of dropping it.
   - `Interface::mac_address` is the three-state `MacObservation` (schema
     v2): `Present(addr)` (serialized as the plain address string),
     `Absent` (observed: the interface has **no** hardware address, e.g.
@@ -73,6 +78,7 @@ synthetic fixtures; later: CLI output).
 |---|---|---|
 | 1 | WO-01R | original snapshot/topology documents |
 | 2 | WO-02 correction | three-state `MacObservation` everywhere a MAC appears; topology edge kinds `bondMember` and `masterMember` (a master relationship's flavor comes from the master's own kind observation, never an assumption) |
+| 3 | WO-03 | veth `peerIfindex` on interfaces + `vethPeer` topology edge (M2); route `nextHops` — `'single'` / `{ multi: [...] }` / `{ undecoded: reason }` (M3). All additions are serde-defaulted, so v2 documents parse unchanged |
 
 Writers emit the current version; readers accept v1 only where it is
 unambiguous (a v1 document whose every `macAddress` is a non-null string).
@@ -121,11 +127,18 @@ the pipeline assumes a specific provider set.
    may fill.
 3. Cross-source duplicates (same kernel fact seen by netlink and procfs)
    deduplicate into one item with a united `sources` list. Route identity
-   normalizes the output interface (ifindex ↔ name) through the merged
-   interface list and treats procfs's implied main table (254) as equal to
-   netlink's explicit 254.
+   (WO-03 M3) is two-level: a group key (family, table — procfs's implied
+   main 254 equals netlink's explicit 254, destination, metric) plus
+   next-hop-set overlap — within a group, two observations are the same
+   kernel route when any next hop matches (name and ifindex normalized
+   through the merged interface list). This is what makes procfs's
+   first-hop-only view of a multipath route (`/proc/net/route` shows only
+   the first hop — verified live) merge into the netlink multipath
+   observation instead of appearing as a separate route. Identical
+   `Undecoded` markers also deduplicate; a partial single-path view never
+   writes route-level gateway/oif onto a multipath observation.
 4. Output-interface enrichment: merged routes carry both ifindex and name
-   when either is resolvable.
+   when either is resolvable — including every multipath hop.
 
 ### Merged route order
 

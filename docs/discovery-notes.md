@@ -117,6 +117,14 @@ future work); IPv6 routes therefore come only from netlink today.
     its failure was hidden by the old re-exec pattern (see the WO-02
     correction closeout); tests now bring interfaces up before route
     setup.
+13. **Multipath route decoding** (`RTA_MULTIPATH`): each hop carries its
+    own gateway, output interface, per-hop flags, and `rtnh_hops`, which
+    the kernel stores as weight − 1 (iproute2 displays `rtnh_hops + 1`;
+    verified live inside a netns with `ip route add ... nexthop ... weight
+    2/3`). `/proc/net/route` shows only the FIRST hop of a multipath
+    route (verified live), so a procfs observation is a partial view of
+    the same kernel route — the merge treats overlapping next-hop sets as
+    the same route rather than counting it twice (WO-03 M3).
 
 ## Not observable (today, honestly reported as not observed)
 
@@ -128,10 +136,14 @@ future work); IPv6 routes therefore come only from netlink today.
   *decision*, not an observation; it would require an active `ip route get`
   probe (not performed).
 - **DNS resolver state** — future systemd-resolved provider.
-- **Multipath route internals** — only the first next hop is represented,
-  with an explicit note on the route.
-- **veth peer ifindex** — netlink exposes it in link info data on some
-  kernels; the model does not carry it yet (deferred to topology work).
+- **Per-hop traffic distribution of a multipath route** — the kernel
+  reports the hop set and weights (represented in full since WO-03 M3),
+  but not which hop carried a given packet; that would require active
+  probing.
+- **A veth peer living in another network namespace** — the kernel
+  reports the peer's ifindex (represented since WO-03 M2); when the peer
+  is not part of the same observation it stays unknown, and its ifindex
+  is not assumed to be visible here.
 
 ## Permissions
 

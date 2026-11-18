@@ -2,9 +2,12 @@
   import type { NetworkSnapshot, Route } from '../types';
   import { formatGateway, formatIpNet, formatProtocol } from '../lib/format';
   import {
+    hopCount,
+    isMultipath,
     routeAriaLabel,
     routeKey,
     tableOptions,
+    undecodedHopsReason,
     visibleRoutes,
     MAIN_TABLE,
   } from '../lib/routes';
@@ -56,6 +59,24 @@
   function typeLabel(route: Route): string {
     if (route.routeType === null) return '—';
     return typeof route.routeType === 'string' ? route.routeType : `type-${route.routeType.other}`;
+  }
+
+  // WO-03 M3: for a multipath route the gateways and output interfaces
+  // live on the hops; the route-level fields are null by design. The row
+  // shows the hop count and the distinct hop interfaces — never "on-link",
+  // which would claim an observed absence of gateways that did not happen.
+  function hopGatewayLabel(route: Route): string {
+    if (undecodedHopsReason(route) !== null) return 'not decodable';
+    return `${hopCount(route)} next hops`;
+  }
+
+  function hopInterfaceLabel(route: Route): string {
+    if (!isMultipath(route)) return '';
+    const hops = (route.nextHops as { multi: { outputInterfaceName: string | null; outputInterface: number | null }[] }).multi;
+    const names = hops.map(
+      (hop) => hop.outputInterfaceName ?? (hop.outputInterface !== null ? `#${hop.outputInterface}` : '?'),
+    );
+    return [...new Set(names)].join(', ');
   }
 </script>
 
@@ -134,7 +155,7 @@
                 {#if route.notes.length > 0}
                   <span
                     class="note-badge"
-                    title="This route carries observation notes — open the details for the full picture (e.g. a multipath route currently represented by its first next hop only)"
+                    title="This route carries observation notes — open the details for the full picture"
                     aria-hidden="true"
                   >!</span>
                 {/if}
@@ -146,14 +167,34 @@
                   {route.destination.address}/{route.destination.prefixLen}
                 {/if}
               </td>
-              <td class="mono" title={route.gateway === null ? 'the kernel reported no gateway for this route (on-link)' : undefined}>
-                {formatGateway(route.gateway)}
+              <td class="mono">
+                {#if isMultipath(route)}
+                  <span
+                    class="multipath"
+                    title="multipath route — the gateways are per next hop; open the details to see every hop"
+                  >{hopGatewayLabel(route)}</span>
+                {:else if undecodedHopsReason(route) !== null}
+                  <span
+                    class="multipath"
+                    title="the kernel sent RTA_MULTIPATH but it could not be decoded; the reason is in the details"
+                  >{hopGatewayLabel(route)}</span>
+                {:else}
+                  <span title={route.gateway === null ? 'the kernel reported no gateway for this route (on-link)' : undefined}>
+                    {formatGateway(route.gateway)}
+                  </span>
+                {/if}
               </td>
               <td
                 class="mono oif"
-                title={route.outputInterfaceName ?? (route.outputInterface !== null ? `ifindex ${route.outputInterface}` : 'output interface not observed')}
+                title={isMultipath(route)
+                  ? 'multipath route — output interface is per next hop; every hop is in the details'
+                  : route.outputInterfaceName ?? (route.outputInterface !== null ? `ifindex ${route.outputInterface}` : 'output interface not observed')}
               >
-                {route.outputInterfaceName ?? (route.outputInterface !== null ? `#${route.outputInterface}` : '—')}
+                {#if isMultipath(route)}
+                  {hopInterfaceLabel(route)}
+                {:else}
+                  {route.outputInterfaceName ?? (route.outputInterface !== null ? `#${route.outputInterface}` : '—')}
+                {/if}
               </td>
               <td><span class="family {route.family}">{route.family}</span></td>
               <td title={route.protocol === null ? 'not observed' : undefined}>
@@ -312,9 +353,9 @@
     background: color-mix(in srgb, var(--accent) 4%, transparent);
   }
 
-  /* Rows with observation notes (e.g. the multipath first-hop-only
-     representation) are marked so the limitation is discoverable from the
-     table itself — not only in the details panel. */
+  /* Rows with observation notes (e.g. implied-table procfs provenance)
+     are marked so the caveat is discoverable from the table itself — not
+     only in the details panel. */
   tr.has-notes .note-badge {
     display: inline-grid;
     place-items: center;
@@ -328,6 +369,17 @@
     font-size: 10px;
     font-weight: 700;
     vertical-align: middle;
+  }
+
+  /* Multipath rows: the hop summary replaces the single gateway — visually
+     distinct so it reads as "several hops, see details", not as an address. */
+  .multipath {
+    color: var(--accent-blue);
+    border: 1px solid color-mix(in srgb, var(--accent-blue) 45%, transparent);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+    white-space: nowrap;
   }
 
   /* Keyboard focus is always visible on operable rows. */

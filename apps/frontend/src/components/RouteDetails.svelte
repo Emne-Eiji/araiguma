@@ -2,13 +2,13 @@
   // Contextual details for a selected route. Overlays the workspace (same
   // discipline as the overview and topology details panels) so the main
   // table is never permanently narrowed. This is where route flags,
-  // observation notes (including representation limitations such as the
-  // current multipath first-hop-only form), and provenance are fully
-  // visible (WO-02 correction §4) — the table stays scannable.
+  // observation notes, the FULL multipath next-hop list (WO-03 M3), and
+  // provenance are fully visible (WO-02 correction §4) — the table stays
+  // scannable.
 
-  import type { Route } from '../types';
+  import type { NextHop, Route } from '../types';
   import { formatGateway, formatIpNet, formatProtocol } from '../lib/format';
-  import { routeHasLimitationNotes } from '../lib/routes';
+  import { isMultipath, routeHasLimitationNotes, undecodedHopsReason } from '../lib/routes';
 
   let {
     route,
@@ -28,6 +28,23 @@
     return typeof route.routeType === 'string'
       ? route.routeType
       : `type-${route.routeType.other}`;
+  }
+
+  function hopInterface(hop: NextHop): string {
+    return (
+      hop.outputInterfaceName
+      ?? (hop.outputInterface !== null ? `ifindex ${hop.outputInterface}` : '—')
+    );
+  }
+
+  function hopFlags(hop: NextHop): string {
+    if (hop.flags === null) return 'not observed';
+    if (hop.flags.length === 0) return 'none set';
+    return hop.flags.join(', ');
+  }
+
+  function multipathHops(): NextHop[] {
+    return isMultipath(route) ? (route.nextHops as { multi: NextHop[] }).multi : [];
   }
 </script>
 
@@ -51,26 +68,37 @@
     <dl>
       <dt>Destination</dt>
       <dd class="mono">{formatIpNet(route.destination)}</dd>
-      <dt>Gateway</dt>
-      <dd class="mono" title={route.gateway === null
-        ? 'the kernel reported no gateway for this route (on-link) — an observed absence'
-        : undefined}
-      >
-        {formatGateway(route.gateway)}
-      </dd>
-      <dt>Output interface</dt>
-      <dd class="mono">
-        {route.outputInterfaceName
-          ?? (route.outputInterface !== null ? `ifindex ${route.outputInterface}` : '—')}
-        <span class="dim" title={route.outputInterface === null && route.outputInterfaceName === null
-          ? 'output interface not observed'
+      {#if isMultipath(route)}
+        <dt>Gateway</dt>
+        <dd class="mono" title="multipath route — each next hop carries its own gateway; see the next-hop list below">
+          per next hop ({multipathHops().length} hops)
+        </dd>
+        <dt>Output interface</dt>
+        <dd class="mono" title="multipath route — each next hop carries its own output interface; see the next-hop list below">
+          per next hop
+        </dd>
+      {:else}
+        <dt>Gateway</dt>
+        <dd class="mono" title={route.gateway === null
+          ? 'the kernel reported no gateway for this route (on-link) — an observed absence'
           : undefined}
         >
-          {#if route.outputInterface !== null && route.outputInterfaceName !== null}
-            (#{route.outputInterface})
-          {/if}
-        </span>
-      </dd>
+          {formatGateway(route.gateway)}
+        </dd>
+        <dt>Output interface</dt>
+        <dd class="mono">
+          {route.outputInterfaceName
+            ?? (route.outputInterface !== null ? `ifindex ${route.outputInterface}` : '—')}
+          <span class="dim" title={route.outputInterface === null && route.outputInterfaceName === null
+            ? 'output interface not observed'
+            : undefined}
+          >
+            {#if route.outputInterface !== null && route.outputInterfaceName !== null}
+              (#{route.outputInterface})
+            {/if}
+          </span>
+        </dd>
+      {/if}
       <dt>Protocol</dt>
       <dd>{formatProtocol(route.protocol)}</dd>
       <dt>Scope</dt>
@@ -84,6 +112,46 @@
       <dt>Table</dt>
       <dd class="mono">{route.table ?? '—'}</dd>
     </dl>
+  </section>
+
+  <section data-testid="route-next-hops">
+    <h3>Next hops</h3>
+    {#if isMultipath(route)}
+      <p class="hops-intro">
+        Multipath route (kernel RTA_MULTIPATH) — every observed next hop is
+        listed; nothing is flattened or dropped.
+      </p>
+      <ol class="hops">
+        {#each multipathHops() as hop, index (index)}
+          <li data-testid="route-next-hop">
+            <div class="hop-line">
+              <span class="hop-index mono">{index + 1}</span>
+              <span class="mono">via {formatGateway(hop.gateway)}</span>
+              <span class="mono dim">on {hopInterface(hop)}</span>
+              {#if hop.weight !== null}
+                <span class="hop-weight mono" title="kernel weight (rtnh_hops + 1), as iproute2 displays it">weight {hop.weight}</span>
+              {:else}
+                <span class="dim" title="not observed">weight —</span>
+              {/if}
+            </div>
+            <div class="hop-flags dim">
+              flags: {hopFlags(hop)}
+            </div>
+          </li>
+        {/each}
+      </ol>
+    {:else if undecodedHopsReason(route) !== null}
+      <p class="warning" data-testid="route-next-hops-undecoded" role="note">
+        The kernel sent a multipath attribute that could not be decoded —
+        the next-hop set is NOT known: “{undecodedHopsReason(route)}”. The
+        route-level fields above are not a substitute for the hop list.
+      </p>
+    {:else}
+      <p class="empty">
+        Single-path route — the gateway and output interface above are the
+        one next hop.
+      </p>
+    {/if}
   </section>
 
   <section data-testid="route-flags">
@@ -234,6 +302,59 @@
   .notes li {
     margin-bottom: 4px;
     overflow-wrap: anywhere;
+  }
+
+  .hops-intro {
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin: 0 0 8px;
+  }
+
+  .hops {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .hops li {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-s);
+    padding: 6px 8px;
+  }
+
+  .hop-line {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 12.5px;
+  }
+
+  .hop-index {
+    display: inline-grid;
+    place-items: center;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+    color: var(--text-muted);
+    font-size: 10px;
+  }
+
+  .hop-weight {
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    padding: 0 5px;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  .hop-flags {
+    margin: 4px 0 0 24px;
+    font-size: 11px;
   }
 
   .sources {

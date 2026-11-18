@@ -59,10 +59,19 @@ impl NetworkSnapshot {
             .collect()
     }
 
+    /// Routes whose next-hop set uses the interface: a single-path route's
+    /// output interface, or any multipath hop's interface (WO-03 M3).
     pub fn routes_using_interface(&self, ifindex: u32) -> Vec<&Route> {
         self.routes
             .iter()
-            .filter(|r| r.output_interface == Some(ifindex))
+            .filter(|r| match &r.next_hops {
+                crate::model::NextHops::Single => r.output_interface == Some(ifindex),
+                crate::model::NextHops::Multi(hops) => {
+                    r.output_interface == Some(ifindex)
+                        || hops.iter().any(|hop| hop.output_interface == Some(ifindex))
+                }
+                crate::model::NextHops::Undecoded(_) => r.output_interface == Some(ifindex),
+            })
             .collect()
     }
 
@@ -168,6 +177,7 @@ type RouteKey = (
     Option<u32>,
     Option<String>,
     Option<u32>,
+    crate::model::NextHops,
 );
 
 fn route_key(route: &Route) -> RouteKey {
@@ -179,6 +189,7 @@ fn route_key(route: &Route) -> RouteKey {
         route.output_interface,
         route.output_interface_name.clone(),
         route.metric,
+        route.next_hops.clone(),
     )
 }
 

@@ -5,6 +5,26 @@ import type { NetworkSnapshot, Route } from '../types';
 
 export const MAIN_TABLE = 254;
 
+// WO-03 M3: route next-hop representation predicates. 'single' routes put
+// their next hop in the route-level fields; 'multi' routes carry every
+// observed hop in nextHops.multi (route-level gateway/outputInterface are
+// null and must NOT be presented as on-link — the hops carry the gateways);
+// 'undecoded' marks an RTA_MULTIPATH the kernel sent but could not be
+// decoded (reason kept verbatim).
+export function isMultipath(route: Route): boolean {
+  return typeof route.nextHops === 'object' && 'multi' in route.nextHops;
+}
+
+export function undecodedHopsReason(route: Route): string | null {
+  return typeof route.nextHops === 'object' && 'undecoded' in route.nextHops
+    ? route.nextHops.undecoded
+    : null;
+}
+
+export function hopCount(route: Route): number {
+  return isMultipath(route) ? (route.nextHops as { multi: unknown[] }).multi.length : 1;
+}
+
 export interface TableOption {
   table: number;
   label: string;
@@ -63,17 +83,20 @@ export function routeKey(route: Route, index: number): string {
   return [
     route.family,
     route.destination ? `${route.destination.address}/${route.destination.prefixLen}` : 'none',
-    route.gateway ?? 'onlink',
+    route.gateway ?? (isMultipath(route) ? `multipath-${hopCount(route)}` : 'onlink'),
     route.outputInterfaceName ?? String(route.outputInterface ?? '?'),
     route.metric ?? 'none',
     route.table ?? '?',
+    undecodedHopsReason(route) ?? '',
     index,
   ].join('|');
 }
 
 // Accessible summary of a route row for screen readers and keyboard
 // navigation (WO-02 correction §9.4): the same facts the visual row shows,
-// plus a hint that observation notes exist when they do.
+// plus a hint that observation notes exist when they do. Multipath rows
+// name the hop count (WO-03 M3) — the gateways live in the hop list, and
+// "on-link" would be wrong for them.
 export function routeAriaLabel(route: Route): string {
   const destination =
     route.destination === null
@@ -81,8 +104,13 @@ export function routeAriaLabel(route: Route): string {
       : route.destination.prefixLen === 0
         ? 'default route'
         : `route ${route.destination.address}/${route.destination.prefixLen}`;
-  const gateway =
-    route.gateway === null ? 'on-link' : `via ${route.gateway}`;
+  const nextHops = undecodedHopsReason(route)
+    ? 'next hops not decodable'
+    : isMultipath(route)
+      ? `multipath with ${hopCount(route)} next hops`
+      : route.gateway === null
+        ? 'on-link'
+        : `via ${route.gateway}`;
   const output =
     route.outputInterfaceName !== null
       ? `on ${route.outputInterfaceName}`
@@ -94,13 +122,15 @@ export function routeAriaLabel(route: Route): string {
     route.notes.length > 0
       ? `, carries ${route.notes.length} observation note${route.notes.length === 1 ? '' : 's'} — open details for limitations`
       : '';
-  return `${destination} ${gateway} ${output}, ${route.family}, table ${table}${notes}`;
+  return `${destination} ${nextHops} ${output}, ${route.family}, table ${table}${notes}`;
 }
 
-// Whether a route's observation is explicitly incomplete (provider notes
-// such as the current multipath first-hop-only representation). Surfaced as
-// a row marker and a details-panel warning so a partial representation can
-// never be mistaken for a complete one (WO-02 correction §4/§9.6).
+// Whether a route's observation carries explicit caveats (provider notes
+// such as implied-table procfs provenance or undecodable attributes).
+// Surfaced as a row marker and a details-panel warning so a partial
+// representation can never be mistaken for a complete one (WO-02
+// correction §4; the multipath first-hop-only limitation it was built for
+// is resolved by WO-03 M3, and the marker stays for any future caveat).
 export function routeHasLimitationNotes(route: Route): boolean {
   return route.notes.length > 0;
 }

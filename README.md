@@ -86,10 +86,10 @@ araiguma topology --input snapshot.json
   root); the frontend targets a browser for now.
 - NetworkManager / systemd-resolved integration is not implemented; the
   sandbox has no system bus. Nothing claims such testing.
-- Multipath routes show only their first next hop — an explicit note on
-  each such route, a row marker, and a warning in the route details make
-  the incomplete representation impossible to miss (full multipath
-  representation is planned work).
+- Multipath routes are represented in full (every observed next hop with
+  gateway, output interface, weight, per-hop flags — schema v3). The one
+  remaining gap is explicit in the data: a kernel multipath attribute that
+  cannot be decoded is shown as "not decodable", never flattened.
 - WireGuard peer configuration is not observable unprivileged; never shown.
 - MAC addresses are three-state observations (present / observed no
   hardware address / not observed, schema v2) — never conflated.

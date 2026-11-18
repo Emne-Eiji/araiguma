@@ -142,7 +142,8 @@
       ],
       "notes": [
         "table implied: /proc/net/route exposes only the main table (254)"
-      ]
+      ],
+      "nextHops": "single"
     },
     {
       "family": "ipv4",
@@ -164,7 +165,8 @@
       ],
       "notes": [
         "table implied: /proc/net/route exposes only the main table (254)"
-      ]
+      ],
+      "nextHops": "single"
     },
     {
       "family": "ipv4",
@@ -186,7 +188,8 @@
       ],
       "notes": [
         "table implied: /proc/net/route exposes only the main table (254)"
-      ]
+      ],
+      "nextHops": "single"
     }
   ],
   "providers": [

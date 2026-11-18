@@ -308,7 +308,7 @@ fn gateway_without_oif_is_inferred_only_when_unambiguous() {
 
 use araiguma_core::model::{
     Address, AddressFamily, AddressScope, AdminState, Interface, InterfaceKind, IpNet,
-    MacObservation, OperState, Route, RouteProtocol, RouteScope, RouteType,
+    MacObservation, NextHop, NextHops, OperState, Route, RouteProtocol, RouteScope, RouteType,
 };
 
 #[test]
@@ -522,6 +522,7 @@ fn route_fixture(oif: Option<u32>, dest: &str, prefix: u8, gateway: Option<&str>
         metric: Some(0),
         table: Some(254),
         flags: Some(vec![]),
+        next_hops: NextHops::Single,
         sources: vec![ObservationSource::Netlink],
         notes: vec![],
     }
@@ -609,4 +610,55 @@ fn non_veth_interfaces_never_get_peer_edges() {
     assert!(doc.edges.iter().any(|e| e.edge_kind == EdgeKind::LinkParent
         && e.from == interface(3)
         && e.to == interface(2)));
+}
+
+#[test]
+fn multipath_hops_count_as_routes_using_their_interfaces() {
+    // WO-03 M3: a multipath route uses EVERY hop's output interface; the
+    // node details reflect that (and the default-route count when the
+    // multipath route is a default).
+    let mut snapshot = fixture("empty");
+    snapshot.interfaces = vec![
+        interface_fixture(2, "eth0", "ethernet"),
+        interface_fixture(3, "wlp3s0", "ethernet"),
+    ];
+    snapshot.routes = vec![Route {
+        family: AddressFamily::Ipv4,
+        destination: Some(IpNet::new(IpAddr::V4("0.0.0.0".parse().unwrap()), 0)),
+        gateway: None,
+        output_interface: None,
+        output_interface_name: None,
+        protocol: Some(RouteProtocol::Static),
+        scope: Some(RouteScope::Universe),
+        route_type: Some(RouteType::Unicast),
+        metric: Some(50),
+        table: Some(254),
+        flags: Some(vec![]),
+        next_hops: NextHops::Multi(vec![
+            NextHop {
+                gateway: Some(IpAddr::V4("192.168.1.1".parse().unwrap())),
+                output_interface: Some(2),
+                output_interface_name: Some("eth0".into()),
+                weight: Some(1),
+                flags: Some(vec![]),
+            },
+            NextHop {
+                gateway: Some(IpAddr::V4("192.168.5.1".parse().unwrap())),
+                output_interface: Some(3),
+                output_interface_name: Some("wlp3s0".into()),
+                weight: Some(2),
+                flags: Some(vec![]),
+            },
+        ]),
+        sources: vec![ObservationSource::Netlink],
+        notes: vec![],
+    }];
+
+    let doc = build_topology(&snapshot);
+    let eth0 = doc.nodes.iter().find(|n| n.label == "eth0").unwrap();
+    let wlp3s0 = doc.nodes.iter().find(|n| n.label == "wlp3s0").unwrap();
+    assert_eq!(eth0.detail.routes_using, 1);
+    assert_eq!(eth0.detail.default_routes, 1);
+    assert_eq!(wlp3s0.detail.routes_using, 1);
+    assert_eq!(wlp3s0.detail.default_routes, 1);
 }

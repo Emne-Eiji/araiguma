@@ -530,6 +530,58 @@ pub struct Address {
     pub sources: Vec<ObservationSource>,
 }
 
+/// One observed next hop of a multipath route (`RTA_MULTIPATH` entry).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NextHop {
+    /// Next-hop gateway. `None` = the kernel reported no gateway for this
+    /// hop (on-link) — the same observed-absence semantics as
+    /// [`Route::gateway`].
+    pub gateway: Option<IpAddr>,
+    /// Output interface index; `None` = not observed.
+    pub output_interface: Option<u32>,
+    /// Output interface name, resolved during the merge; `None` = not
+    /// resolved (translators record only the ifindex).
+    pub output_interface_name: Option<String>,
+    /// Hop weight. The kernel stores `rtnh_hops` (weight − 1); this field
+    /// carries the effective weight (`rtnh_hops + 1`) as iproute2
+    /// displays it. `None` = not observed (the field is absent for
+    /// unweighted hops on some kernels).
+    pub weight: Option<u16>,
+    /// Per-hop flags (`RTNH_F_*`: dead, onlink, linkdown, ...) as
+    /// lowercase names; `None` = not observed.
+    pub flags: Option<Vec<String>>,
+}
+
+/// How a route's next hops were observed (WO-03 M3, schema v3).
+///
+/// * [`NextHops::Single`] — the kernel sent no `RTA_MULTIPATH`: the
+///   route-level `gateway`/`output_interface` ARE the next hop.
+/// * [`NextHops::Multi`] — `RTA_MULTIPATH` was decoded; every observed
+///   hop is listed and the route-level `gateway`/`output_interface` are
+///   `None` (the hops carry them — never flattened into one gateway).
+/// * [`NextHops::Undecoded`] — `RTA_MULTIPATH` was present but could not
+///   be decoded; the reason is kept verbatim.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NextHops {
+    #[default]
+    Single,
+    Multi(Vec<NextHop>),
+    Undecoded(String),
+}
+
+impl NextHops {
+    /// Number of observed next hops (0 when not represented or undecoded).
+    pub fn observed_hop_count(&self) -> usize {
+        match self {
+            NextHops::Single => 1,
+            NextHops::Multi(hops) => hops.len(),
+            NextHops::Undecoded(_) => 0,
+        }
+    }
+}
+
 /// An observed route.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -560,6 +612,15 @@ pub struct Route {
     pub table: Option<u32>,
     /// Kernel route flags as lowercase names; `None` = not observed.
     pub flags: Option<Vec<String>>,
+    /// The route's next hops: single-path (route-level fields), the full
+    /// multipath hop list, or an explicit undecodable marker. See
+    /// [`NextHops`].
+    ///
+    /// Defaulted so pre-M3 documents (schema v1/v2, and M2-era v3) parse
+    /// unchanged: their routes predate multipath representation and are
+    /// single-path by construction, which is exactly `NextHops::Single`.
+    #[serde(default)]
+    pub next_hops: NextHops,
     pub sources: Vec<ObservationSource>,
     pub notes: Vec<String>,
 }

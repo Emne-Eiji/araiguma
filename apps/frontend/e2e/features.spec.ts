@@ -90,38 +90,48 @@ test('routes view defaults to the main table with an explicit filter', async ({ 
 
   // Semantics are explicit: on-link rows carry the explanatory tooltip
   // (an observed absence of a gateway, not missing data).
-  await expect(table.locator('td[title*="no gateway"]').first()).toBeVisible();
+  await expect(table.locator('[title*="no gateway"]').first()).toBeVisible();
 });
 
-test('route details expose flags, notes, sources, and limitations', async ({ page }) => {
+test('route details expose flags, notes, sources, and the full multipath hop list', async ({
+  page,
+}) => {
   await page.goto('/');
   await page.getByTestId('nav-routes').click();
 
   const rows = page.getByTestId('routes-table').locator('tbody tr');
 
-  // The multipath-marked default carries the row marker (the limitation is
-  // discoverable from the table itself).
-  const markedRow = rows.filter({ has: page.locator('.note-badge') });
-  await expect(markedRow).toHaveCount(1);
+  // The multipath route is identifiable from the table itself: the
+  // gateway cell announces the hop count and the interface cell lists the
+  // hop interfaces (WO-03 M3) — never "on-link", which the null
+  // route-level gateway would wrongly suggest.
+  const multipathRow = rows.filter({ hasText: '2 next hops' });
+  await expect(multipathRow).toHaveCount(1);
+  await expect(multipathRow).toContainText('eth0, wlp3s0');
 
   // Rows are keyboard-operable: focus a row and press Enter.
-  const target = markedRow.first();
-  await target.focus();
-  await target.press('Enter');
+  await multipathRow.focus();
+  await multipathRow.press('Enter');
   const panel = page.getByTestId('route-details');
   await expect(panel).toBeVisible();
 
-  // The panel shows the full metadata the table cannot fit: flags,
-  // provenance, the observation note stating the incomplete multipath
-  // representation, and an explicit warning that this observation is
-  // limited.
+  // The panel lists EVERY observed next hop: gateways, output
+  // interfaces, weights, per-hop flags — nothing flattened or dropped.
+  const hops = panel.getByTestId('route-next-hop');
+  await expect(hops).toHaveCount(2);
+  await expect(hops.nth(0)).toContainText('via 198.51.100.1');
+  await expect(hops.nth(0)).toContainText('eth0');
+  await expect(hops.nth(0)).toContainText('weight 1');
+  await expect(hops.nth(1)).toContainText('wlp3s0');
+  await expect(hops.nth(1)).toContainText('weight 2');
+  // Route-level fields point at the hop list instead of masquerading as
+  // a single gateway / on-link.
+  await expect(panel.getByText('per next hop (2 hops)')).toBeVisible();
+
+  // The rest of the metadata the table cannot fit stays fully visible.
   await expect(panel.getByTestId('route-flags')).toBeVisible();
   await expect(panel.getByTestId('route-flags')).toContainText('none set');
   await expect(panel.getByTestId('route-sources')).toContainText('netlink');
-  await expect(panel.getByTestId('route-notes')).toContainText(
-    /multipath route with 2 next hops; only the first is represented/,
-  );
-  await expect(panel.getByTestId('route-limitation-warning')).toBeVisible();
 
   // The workspace is not permanently narrowed (overlay panel).
   const widthDuring = await page
@@ -144,11 +154,13 @@ test('route details expose flags, notes, sources, and limitations', async ({ pag
   await rows.first().focus();
   await rows.first().press(' ');
   await expect(page.getByTestId('route-details')).toBeVisible();
-  // Accessible labels exist on every operable row.
+  // Accessible labels exist on every operable row, and the multipath row
+  // announces its hop count.
   const labels = await page.getByTestId('routes-table').locator('tbody tr').evaluateAll(
     (trs) => trs.map((tr) => (tr as HTMLElement).getAttribute('aria-label') ?? ''),
   );
   expect(labels.every((l) => l.length > 0)).toBe(true);
+  expect(labels.some((l) => l.includes('multipath with 2 next hops'))).toBe(true);
   expect(labels.some((l) => l.includes('multipath') === false && l.includes('route'))).toBe(true);
 });
 
@@ -213,6 +225,7 @@ test('test instrumentation is inert in the production build', async ({ page }) =
 
 import workstationSnapshot from '../../../fixtures/snapshots/workstation.json' with { type: 'json' };
 import serverTunnelSnapshot from '../../../fixtures/snapshots/server-tunnel.json' with { type: 'json' };
+import incompleteSnapshot from '../../../fixtures/snapshots/incomplete-observations.json' with { type: 'json' };
 import workstationTopology from '../../../fixtures/topology/workstation.json' with { type: 'json' };
 
 test('import workflow: snapshot and topology documents, provenance, and return to mock', async ({
@@ -284,4 +297,36 @@ test('import workflow: an unsupported schema version is rejected with the reason
   await expect(page.getByTestId('import-error')).toContainText('schema version');
   // Still mock mode; nothing was partially applied.
   await expect(page.getByTestId('mock-badge')).toBeVisible();
+});
+
+// WO-02 §4/§9.6 (still current after WO-03 M3): a route whose observation
+// carries caveats is marked in the table and explained in the details —
+// exercised through the import workflow with the procfs-only fixture,
+// whose routes carry implied-table notes.
+test('import workflow: noted observations are marked and explained in the routes view', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByTestId('import-file-input').setInputFiles({
+    name: 'procfs-run.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(incompleteSnapshot)),
+  });
+  await expect(page.getByTestId('imported-badge')).toBeVisible();
+
+  await page.getByTestId('nav-routes').click();
+  const rows = page.getByTestId('routes-table').locator('tbody tr');
+  await expect(rows).toHaveCount(3);
+
+  // Every procfs route carries the implied-table note and the marker.
+  const marked = rows.filter({ has: page.locator('.note-badge') });
+  await expect(marked).toHaveCount(3);
+
+  await marked.first().click();
+  const panel = page.getByTestId('route-details');
+  await expect(panel).toBeVisible();
+  await expect(panel.getByTestId('route-limitation-warning')).toBeVisible();
+  await expect(panel.getByTestId('route-notes')).toContainText(
+    /table implied: \/proc\/net\/route exposes only the main table/,
+  );
 });

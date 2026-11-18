@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use araiguma_core::model::{
     Address, AddressFamily, AddressScope, AdminState, Interface, InterfaceKind, IpNet,
-    MacObservation, ObservationSource, OperState, Route, RT_TABLE_MAIN,
+    MacObservation, NextHops, ObservationSource, OperState, Route, RT_TABLE_MAIN,
 };
 use araiguma_core::provider::{DiscoveryProvider, ProviderId, ProviderObservation, SectionResult};
 
@@ -183,6 +183,7 @@ impl SysFsProvider {
                 metric: Some(entry.metric),
                 table: Some(RT_TABLE_MAIN as u32),
                 flags: None,
+                next_hops: NextHops::Single,
                 sources: vec![ObservationSource::ProcFs],
                 notes: vec![NOTE_TABLE_IMPLIED.to_string()],
             });

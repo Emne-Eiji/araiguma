@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAIN_TABLE,
+  hopCount,
+  isMultipath,
   routeAriaLabel,
   routeHasLimitationNotes,
+  routeKey,
   tableOptions,
+  undecodedHopsReason,
   visibleRoutes,
 } from '../src/lib/routes';
 import { fixtures } from '../src/lib/fixtures';
@@ -91,6 +95,7 @@ describe('route accessibility and limitation markers (WO-02 correction §4/§9.4
     metric: 100,
     table: 254,
     flags: ['onlink'],
+    nextHops: 'single',
     sources: ['netlink', 'procfs'],
     notes: [],
   };
@@ -116,20 +121,106 @@ describe('route accessibility and limitation markers (WO-02 correction §4/§9.4
     expect(routeAriaLabel(unknown)).toContain('output interface not observed');
   });
 
-  it('marks routes whose observation is explicitly incomplete', () => {
+  it('marks routes whose observation carries caveats', () => {
     expect(routeHasLimitationNotes(base)).toBe(false);
-    const multipath: Route = {
+    const procfs: Route = {
       ...base,
-      notes: ['multipath route with 2 next hops; only the first is represented'],
+      notes: ['table implied: /proc/net/route exposes only the main table (254)'],
     };
-    expect(routeHasLimitationNotes(multipath)).toBe(true);
+    expect(routeHasLimitationNotes(procfs)).toBe(true);
   });
 
-  it('the workstation fixture covers the limitation-marker path', () => {
-    // One synthetic default is a multipath route whose representation is
-    // incomplete today — the UI must be able to show that honestly.
-    const marked = fixtures.workstation.snapshot.routes.filter(routeHasLimitationNotes);
-    expect(marked.length).toBe(1);
-    expect(marked[0].notes[0]).toMatch(/multipath route with 2 next hops/);
+  it('the incomplete-observations fixture covers the note-marker path', () => {
+    // The procfs-only scenario carries implied-table notes — the UI must
+    // be able to show provider caveats honestly from the table itself.
+    const marked = fixtures['incomplete-observations'].snapshot.routes.filter(routeHasLimitationNotes);
+    expect(marked.length).toBe(3);
+    expect(marked[0].notes[0]).toMatch(/table implied/);
+  });
+});
+
+describe('multipath representation (WO-03 M3)', () => {
+  const single: Route = {
+    family: 'ipv4',
+    destination: { address: '10.0.0.0', prefixLen: 24 },
+    gateway: '10.0.0.1',
+    outputInterface: 2,
+    outputInterfaceName: 'eth0',
+    protocol: 'static',
+    scope: 'link',
+    routeType: 'unicast',
+    metric: 0,
+    table: 254,
+    flags: null,
+    nextHops: 'single',
+    sources: ['netlink'],
+    notes: [],
+  };
+
+  const multi: Route = {
+    ...single,
+    gateway: null,
+    outputInterface: null,
+    outputInterfaceName: null,
+    nextHops: {
+      multi: [
+        { gateway: '10.0.0.1', outputInterface: 2, outputInterfaceName: 'eth0', weight: 2, flags: ['onlink'] },
+        { gateway: '10.0.1.1', outputInterface: 3, outputInterfaceName: 'wlp3s0', weight: 1, flags: [] },
+      ],
+    },
+  };
+
+  const undecoded: Route = {
+    ...single,
+    gateway: null,
+    outputInterface: null,
+    outputInterfaceName: null,
+    nextHops: { undecoded: 'RTA_MULTIPATH attribute carried no next hops' },
+  };
+
+  it('classifies single, multi, and undecoded representations', () => {
+    expect(isMultipath(single)).toBe(false);
+    expect(isMultipath(multi)).toBe(true);
+    expect(isMultipath(undecoded)).toBe(false);
+    expect(hopCount(single)).toBe(1);
+    expect(hopCount(multi)).toBe(2);
+    expect(hopCount(undecoded)).toBe(1); // no hop list observed
+    expect(undecodedHopsReason(single)).toBeNull();
+    expect(undecodedHopsReason(multi)).toBeNull();
+    expect(undecodedHopsReason(undecoded)).toBe(
+      'RTA_MULTIPATH attribute carried no next hops',
+    );
+  });
+
+  it('the aria label announces the hop count, never a false on-link', () => {
+    // A multipath route has null route-level gateway BY DESIGN (the hops
+    // carry the gateways) — the label must not read it as on-link.
+    expect(routeAriaLabel(multi)).toBe(
+      'route 10.0.0.0/24 multipath with 2 next hops output interface not observed, ipv4, table 254',
+    );
+    expect(routeAriaLabel(multi)).not.toContain('on-link');
+    expect(routeAriaLabel(undecoded)).toContain('next hops not decodable');
+    // Single-path on-link semantics are unchanged.
+    const onlink: Route = { ...single, gateway: null };
+    expect(routeAriaLabel(onlink)).toContain('on-link');
+  });
+
+  it('keys distinguish a multipath route from an on-link route to the same prefix', () => {
+    const onlink: Route = { ...single, gateway: null, metric: 0 };
+    const keys = new Set([routeKey(onlink, 0), routeKey(multi, 1), routeKey(undecoded, 2)]);
+    expect(keys.size).toBe(3);
+  });
+
+  it('the workstation fixture carries a real multipath route with all hops', () => {
+    const mp = fixtures.workstation.snapshot.routes.find(isMultipath);
+    expect(mp).toBeDefined();
+    expect(hopCount(mp!)).toBe(2);
+    const hops = (mp!.nextHops as { multi: { gateway: string | null; outputInterfaceName: string | null; weight: number | null }[] }).multi;
+    expect(hops.map((h) => h.gateway)).toEqual(['198.51.100.1', '198.51.100.1']);
+    expect(hops.map((h) => h.outputInterfaceName)).toEqual(['eth0', 'wlp3s0']);
+    expect(hops.map((h) => h.weight)).toEqual([1, 2]);
+    // Route-level fields stay null — the hops carry them, never flattened.
+    expect(mp!.gateway).toBeNull();
+    expect(mp!.outputInterface).toBeNull();
   });
 });

@@ -245,9 +245,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": [
-        "multipath route with 2 next hops; only the first is represented"
-      ]
+      "notes": [],
+      "nextHops": "single"
     },
     {
       "family": "ipv4",
@@ -269,7 +268,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     },
     {
       "family": "ipv4",
@@ -289,7 +289,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     },
     {
       "family": "ipv4",
@@ -309,7 +310,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     },
     {
       "family": "ipv4",
@@ -329,7 +331,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     },
     {
       "family": "ipv4",
@@ -338,8 +341,8 @@
         "prefixLen": 24
       },
       "gateway": null,
-      "outputInterface": 11,
-      "outputInterfaceName": "dummy0",
+      "outputInterface": null,
+      "outputInterfaceName": null,
       "protocol": "kernel",
       "scope": "link",
       "routeType": "unicast",
@@ -349,7 +352,25 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": {
+        "multi": [
+          {
+            "gateway": "198.51.100.1",
+            "outputInterface": 2,
+            "outputInterfaceName": "eth0",
+            "weight": 1,
+            "flags": []
+          },
+          {
+            "gateway": "198.51.100.1",
+            "outputInterface": 3,
+            "outputInterfaceName": "wlp3s0",
+            "weight": 2,
+            "flags": []
+          }
+        ]
+      }
     },
     {
       "family": "ipv4",
@@ -369,7 +390,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     },
     {
       "family": "ipv4",
@@ -389,7 +411,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     },
     {
       "family": "ipv4",
@@ -409,7 +432,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     },
     {
       "family": "ipv6",
@@ -429,7 +453,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     },
     {
       "family": "ipv6",
@@ -449,7 +474,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     },
     {
       "family": "ipv6",
@@ -469,7 +495,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     }
   ],
   "providers": [

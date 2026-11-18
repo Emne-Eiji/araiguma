@@ -417,3 +417,98 @@ async fn netns_veth_pair_observed_with_peer_relationship() {
         "iproute2 reports the veth kind: {text}"
     );
 }
+
+#[tokio::test]
+async fn netns_multipath_route_observed_with_all_hops() {
+    // WO-03 M3: a real multipath route inside the transient namespace —
+    // every hop with gateway, output interface, and weight; procfs's
+    // first-hop view deduplicates against it; nothing claims a
+    // first-hop-only representation anymore.
+    if !ensure_netns("netns_multipath_route_observed_with_all_hops") {
+        return; // parent: the child already ran and was asserted
+    }
+
+    ip(&["link", "set", "lo", "up"]);
+    ip(&["link", "add", "ar-mp0", "type", "dummy"]);
+    ip(&["link", "set", "ar-mp0", "up"]);
+    ip(&["address", "add", "10.0.0.5/24", "dev", "ar-mp0"]);
+    ip(&["link", "add", "ar-mp1", "type", "dummy"]);
+    ip(&["link", "set", "ar-mp1", "up"]);
+    ip(&["address", "add", "10.1.0.5/24", "dev", "ar-mp1"]);
+    ip(&[
+        "route",
+        "add",
+        "10.9.0.0/24",
+        "nexthop",
+        "via",
+        "10.0.0.1",
+        "dev",
+        "ar-mp0",
+        "weight",
+        "2",
+        "nexthop",
+        "via",
+        "10.1.0.1",
+        "dev",
+        "ar-mp1",
+        "weight",
+        "3",
+    ]);
+
+    let mut netlink = NetlinkProvider::new();
+    let netlink_observation = netlink.observe().await;
+    let mut sysfs = araiguma_sysfs::SysFsProvider::new();
+    let sysfs_observation = sysfs.observe().await;
+    let snapshot = araiguma_core::merge::merge(vec![netlink_observation, sysfs_observation], 9);
+
+    // Exactly one route for the prefix — procfs's first-hop view merged in.
+    let routes: Vec<_> = snapshot
+        .routes
+        .iter()
+        .filter(|r| {
+            r.destination
+                .as_ref()
+                .is_some_and(|d| d.to_string() == "10.9.0.0/24")
+        })
+        .collect();
+    assert_eq!(routes.len(), 1, "one kernel route: {routes:?}");
+    let route = routes[0];
+    assert_eq!(route.gateway, None, "hops carry the gateways");
+    assert!(route.sources.contains(&ObservationSource::ProcFs));
+
+    use araiguma_core::model::{NextHop, NextHops};
+    let NextHops::Multi(hops) = &route.next_hops else {
+        panic!("expected the full hop set, got {:?}", route.next_hops);
+    };
+    assert_eq!(hops.len(), 2, "no hop silently discarded: {hops:?}");
+    let sorted: Vec<&NextHop> = {
+        let mut copy: Vec<&NextHop> = hops.iter().collect();
+        copy.sort_by_key(|hop| hop.output_interface);
+        copy
+    };
+    assert_eq!(sorted[0].gateway.unwrap().to_string(), "10.0.0.1");
+    assert_eq!(sorted[0].weight, Some(2), "weight 2 = kernel rtnh_hops 1");
+    assert_eq!(sorted[0].output_interface_name.as_deref(), Some("ar-mp0"));
+    assert_eq!(sorted[1].gateway.unwrap().to_string(), "10.1.0.1");
+    assert_eq!(sorted[1].weight, Some(3), "weight 3 = kernel rtnh_hops 2");
+    assert_eq!(sorted[1].output_interface_name.as_deref(), Some("ar-mp1"));
+    assert!(
+        !route.notes.iter().any(|n| n.contains("only the first")),
+        "no first-hop-only claim remains"
+    );
+
+    // Cross-validation: iproute2 agrees about both next hops.
+    let output = Command::new("ip")
+        .args(["route", "show", "10.9.0.0/24"])
+        .output()
+        .expect("ip route show");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        text.contains("nexthop via 10.0.0.1 dev ar-mp0 weight 2"),
+        "{text}"
+    );
+    assert!(
+        text.contains("nexthop via 10.1.0.1 dev ar-mp1 weight 3"),
+        "{text}"
+    );
+}

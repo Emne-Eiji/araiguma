@@ -153,12 +153,14 @@ pub fn render_topology(document: &TopologyDocument, pretty: bool) -> String {
 /// Load a snapshot from a file (or stdin when `input` is None) and project
 /// it. Read-only; never observes the live system.
 ///
-/// Schema policy (WO-02 correction §5): current documents are v2
-/// (three-state `macAddress`). v1 documents are accepted **only when
-/// unambiguous** — every `macAddress` must be a non-null string; a v1
-/// `null` cannot distinguish "observed no hardware address" from "not
-/// observed" and is rejected with an explanation instead of being silently
-/// assigned a meaning. Unknown versions are rejected.
+/// Schema policy: current documents are v3 (three-state `macAddress`,
+/// optional veth `peerIfindex` — WO-03 M2, optional route `nextHops` —
+/// WO-03 M3; both defaulted, so pre-v3 documents parse unchanged).
+/// v2 documents are accepted as-is. v1 documents are accepted **only
+/// when unambiguous** — every `macAddress` must be a non-null string; a
+/// v1 `null` cannot distinguish "observed no hardware address" from
+/// "not observed" and is rejected with an explanation instead of being
+/// silently assigned a meaning. Unknown versions are rejected.
 pub fn project_snapshot_to_topology(input: Option<&str>) -> Result<TopologyDocument, String> {
     let raw = match input {
         Some(path) => {
@@ -184,8 +186,11 @@ pub fn project_snapshot_to_topology(input: Option<&str>) -> Result<TopologyDocum
         v if v == u64::from(araiguma_core::snapshot::SNAPSHOT_SCHEMA_VERSION) => {}
         2 => {
             // v2 documents (three-state MAC, pre-veth/multipath) parse
-            // under the v3 model: every v3 addition is optional or
-            // backward-compatible. The MAC rule already rejects ambiguity.
+            // under the v3 model: every v3 addition is defaulted
+            // (`peerIfindex`, `nextHops`) or backward-compatible. The MAC
+            // rule already rejects ambiguity. A route without `nextHops`
+            // is single-path by construction — pre-M3 documents could not
+            // represent multipath hop lists.
         }
         1 => {
             // v1 is acceptable only where its macAddress fields are
@@ -367,5 +372,116 @@ mod tests {
             serde_json::from_str(&resynchronized_envelope(&[], &snapshot)).unwrap();
         assert_eq!(value["event"], "resynchronized");
         assert!(value["snapshot"]["interfaces"].is_array());
+    }
+
+    /// Write `document` to a unique temp file and project it — the same
+    /// document-boundary path `araiguma topology --input` uses. The name
+    /// carries a process-wide counter: tests run in parallel within one
+    /// process, and a shared name would let one test truncate another's
+    /// file between write and read.
+    fn project_tmp(document: &str) -> Result<TopologyDocument, String> {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!(
+            "araiguma-cli-test-{}-{serial}.json",
+            std::process::id()
+        ));
+        std::fs::write(&path, document).expect("writable temp file");
+        let result = project_snapshot_to_topology(Some(path.to_str().unwrap()));
+        let _ = std::fs::remove_file(&path);
+        result
+    }
+
+    /// The minimal route shape shared by the version-policy tests: one
+    /// interface (so the route's oif resolves), one route, no v3-only
+    /// fields unless the test adds them.
+    fn legacy_document(version: u64) -> String {
+        format!(
+            r#"{{
+        "schemaVersion": {version},
+        "timestampMs": 1,
+        "interfaces": [{{
+            "ifindex": 2, "name": "eth0", "kind": "ethernet",
+            "macAddress": "52:54:00:aa:bb:cc",
+            "operState": "up", "adminState": "up",
+            "sources": ["netlink"], "notes": []
+        }}],
+        "addresses": [],
+        "routes": [{{
+            "family": "ipv4",
+            "destination": {{"address": "10.0.0.0", "prefixLen": 24}},
+            "gateway": null, "outputInterface": 2, "outputInterfaceName": null,
+            "protocol": "kernel", "scope": "link", "routeType": "unicast",
+            "metric": 0, "table": 254, "flags": null,
+            "sources": ["netlink"], "notes": []
+        }}],
+        "providers": []
+        }}"#
+        )
+    }
+
+    /// Regression (WO-03 M3): a v2 document — written before `nextHops`
+    /// and `peerIfindex` existed — must project unchanged. This is the
+    /// exact document an Emne-side export produced at the Part 1 gate.
+    #[test]
+    fn v2_document_without_v3_fields_projects() {
+        let topology = project_tmp(&legacy_document(2))
+            .expect("v2 document (no nextHops/peerIfindex) parses under the v3 model");
+        assert_eq!(topology.schema_version, 3);
+        assert_eq!(topology.nodes.len(), 1, "the interface projects to a node");
+    }
+
+    /// Regression (WO-03 M3): an M2-era v3 document carries `peerIfindex`
+    /// but no `nextHops`; the field default must accept it.
+    #[test]
+    fn m2_era_v3_document_without_next_hops_projects() {
+        let topology =
+            project_tmp(&legacy_document(3)).expect("M2-era v3 document (no nextHops) parses");
+        assert_eq!(topology.schema_version, 3);
+    }
+
+    /// A current v3 multipath document round-trips through the projector
+    /// (sanity: the new `nextHops` field itself is no obstacle).
+    #[test]
+    fn v3_multipath_document_projects() {
+        let document = legacy_document(3).replace(
+            r#""sources": ["netlink"], "notes": []
+        }}],
+        "providers""#,
+            r#""nextHops": {{"multi": [
+                {{"gateway": "10.0.0.1", "outputInterface": 2, "outputInterfaceName": null, "weight": 2, "flags": []}},
+                {{"gateway": "10.0.0.2", "outputInterface": 2, "outputInterfaceName": null, "weight": 1, "flags": []}}
+            ]}},
+            "sources": ["netlink"], "notes": []
+        }}],
+        "providers""#,
+        );
+        let topology = project_tmp(&document).expect("v3 multipath document parses");
+        assert_eq!(topology.schema_version, 3);
+    }
+
+    /// v1 stays rejected exactly where it is ambiguous (null MAC), and
+    /// unknown versions stay rejected — the version policy itself is
+    /// regression-locked alongside the acceptance tests.
+    #[test]
+    fn v1_ambiguous_and_unknown_versions_are_rejected() {
+        let ambiguous = legacy_document(1).replace(
+            r#""macAddress": "52:54:00:aa:bb:cc""#,
+            r#""macAddress": null"#,
+        );
+        let error = project_tmp(&ambiguous).expect_err("v1 null MAC is ambiguous");
+        assert!(
+            error.contains("ambiguous in schema v1"),
+            "rejection explains the ambiguity: {error}"
+        );
+
+        let unambiguous = legacy_document(1);
+        project_tmp(&unambiguous).expect("unambiguous v1 is accepted");
+
+        let error = project_tmp(&legacy_document(99)).expect_err("unknown version rejected");
+        assert!(
+            error.contains("unsupported snapshot schemaVersion 99"),
+            "rejection names the version: {error}"
+        );
     }
 }

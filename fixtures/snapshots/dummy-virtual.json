@@ -274,7 +274,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     },
     {
       "family": "ipv4",
@@ -294,7 +295,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     },
     {
       "family": "ipv4",
@@ -314,7 +316,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     },
     {
       "family": "ipv4",
@@ -334,7 +337,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     },
     {
       "family": "ipv4",
@@ -354,7 +358,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "nextHops": "single"
     }
   ],
   "providers": [

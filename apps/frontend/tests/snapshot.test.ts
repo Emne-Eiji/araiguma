@@ -146,3 +146,107 @@ describe('MAC observation validation (schema v2)', () => {
     expect(() => parseSnapshot(v1null)).toThrow(/ambiguous/);
   });
 });
+
+describe('next-hop representation (WO-03 M3, schema v3)', () => {
+  // A minimal single-path route; nextHops is applied per test.
+  const route = (nextHops: unknown) => ({
+    family: 'ipv4',
+    destination: { address: '10.9.0.0', prefixLen: 24 },
+    gateway: null,
+    outputInterface: null,
+    outputInterfaceName: null,
+    protocol: 'kernel',
+    scope: 'link',
+    routeType: 'unicast',
+    metric: 0,
+    table: 254,
+    flags: null,
+    nextHops,
+    sources: ['netlink'],
+    notes: [],
+  });
+  const doc = (nextHops: unknown) => ({
+    schemaVersion: 3,
+    timestampMs: 0,
+    interfaces: [],
+    addresses: [],
+    routes: [route(nextHops)],
+    providers: [],
+  });
+
+  it('parses the explicit multipath representation with every hop', () => {
+    const snapshot = parseSnapshot(
+      doc({
+        multi: [
+          { gateway: '10.0.0.1', outputInterface: 2, outputInterfaceName: 'eth0', weight: 2, flags: ['onlink'] },
+          { gateway: '10.1.0.1', outputInterface: 3, outputInterfaceName: 'ar-mp1', weight: 3, flags: [] },
+        ],
+      }),
+    );
+    const hops = snapshot.routes[0].nextHops;
+    expect(typeof hops).toBe('object');
+    expect(hops).toEqual({
+      multi: [
+        { gateway: '10.0.0.1', outputInterface: 2, outputInterfaceName: 'eth0', weight: 2, flags: ['onlink'] },
+        { gateway: '10.1.0.1', outputInterface: 3, outputInterfaceName: 'ar-mp1', weight: 3, flags: [] },
+      ],
+    });
+  });
+
+  it('normalizes pre-M3 documents (absent nextHops) to single', () => {
+    // A v2 document and an M2-era v3 document both lack nextHops — the
+    // loader must fill 'single' exactly like the Rust serde default, so
+    // consumers can branch on the field without a null check.
+    for (const schemaVersion of [2, 3]) {
+      const legacy = doc(undefined) as Record<string, unknown>;
+      // Remove the field entirely (undefined would be dropped by JSON anyway).
+      delete (legacy.routes as Record<string, unknown>[])[0].nextHops;
+      legacy.schemaVersion = schemaVersion;
+      const snapshot = parseSnapshot(legacy);
+      expect(snapshot.routes[0].nextHops).toBe('single');
+    }
+  });
+
+  it('accepts explicit single and undecodable markers', () => {
+    expect(() => parseSnapshot(doc('single'))).not.toThrow();
+    const undecoded = parseSnapshot(
+      doc({ undecoded: 'RTA_MULTIPATH attribute carried no next hops' }),
+    );
+    expect(undecoded.routes[0].nextHops).toEqual({
+      undecoded: 'RTA_MULTIPATH attribute carried no next hops',
+    });
+  });
+
+  it('rejects malformed next-hop representations with the path', () => {
+    // null must not silently become 'single' (parity with serde's
+    // absent-only default).
+    expect(() => parseSnapshot(doc(null))).toThrow(
+      /\$\.routes\[0\]\.nextHops: must not be null/,
+    );
+    // Unknown plain-string variant.
+    expect(() => parseSnapshot(doc('multi'))).toThrow(/nextHops/);
+    // Empty hop list: not producible by the writer.
+    expect(() => parseSnapshot(doc({ multi: [] }))).toThrow(
+      /nextHops\.multi: an empty hop list is not producible/,
+    );
+    // Hop gateway of the wrong family.
+    expect(() =>
+      parseSnapshot(doc({ multi: [{ gateway: 'fe80::1', outputInterface: 2, weight: 1, flags: [] }] })),
+    ).toThrow(/expected an ipv4 address/);
+    // Weight below the kernel range (rtnh_hops + 1 >= 1) and above (u8).
+    expect(() =>
+      parseSnapshot(doc({ multi: [{ gateway: '10.0.0.1', outputInterface: 2, weight: 0, flags: [] }] })),
+    ).toThrow(/weight/);
+    expect(() =>
+      parseSnapshot(doc({ multi: [{ gateway: '10.0.0.1', outputInterface: 2, weight: 257, flags: [] }] })),
+    ).toThrow(/weight/);
+    // Unknown variant object.
+    expect(() => parseSnapshot(doc({ flurb: 1 }))).toThrow(
+      /expected 'single', \{ multi/,
+    );
+    // A hop that is not an object.
+    expect(() => parseSnapshot(doc({ multi: ['eth0'] }))).toThrow(
+      /nextHops\.multi\[0\]: expected an object/,
+    );
+  });
+});

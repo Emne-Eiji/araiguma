@@ -10,8 +10,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use araiguma_core::model::{
     Address, AddressFamily, AddressScope, AdminState, Interface, InterfaceKind, IpNet,
-    MacObservation, ObservationSource, OperState, Route, RouteProtocol, RouteScope, RouteType,
-    RT_TABLE_MAIN,
+    MacObservation, NextHop, NextHops, ObservationSource, OperState, Route, RouteProtocol,
+    RouteScope, RouteType, RT_TABLE_MAIN,
 };
 use netlink_packet_route::address::{
     AddressAttribute, AddressFlags, AddressMessage, AddressScope as NlAddressScope,
@@ -19,6 +19,7 @@ use netlink_packet_route::address::{
 use netlink_packet_route::link::{
     InfoKind, LinkAttribute, LinkFlags, LinkMessage, State as NlOperState,
 };
+use netlink_packet_route::route::RouteNextHop;
 use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteFlags, RouteMessage};
 use netlink_packet_route::{AddressFamily as NlAddressFamily, RouteNetlinkMessage};
 
@@ -366,6 +367,60 @@ fn route_flags(flags: &RouteFlags) -> Vec<String> {
     names
 }
 
+fn next_hop_flags(flags: &netlink_packet_route::route::RouteNextHopFlags) -> Vec<String> {
+    let mut names = Vec::new();
+    let checks: [(netlink_packet_route::route::RouteNextHopFlags, &str); 7] = [
+        (netlink_packet_route::route::RouteNextHopFlags::Dead, "dead"),
+        (
+            netlink_packet_route::route::RouteNextHopFlags::Pervasive,
+            "pervasive",
+        ),
+        (
+            netlink_packet_route::route::RouteNextHopFlags::Onlink,
+            "onlink",
+        ),
+        (
+            netlink_packet_route::route::RouteNextHopFlags::Offload,
+            "offload",
+        ),
+        (
+            netlink_packet_route::route::RouteNextHopFlags::Linkdown,
+            "linkdown",
+        ),
+        (
+            netlink_packet_route::route::RouteNextHopFlags::Unresolved,
+            "unresolved",
+        ),
+        (netlink_packet_route::route::RouteNextHopFlags::Trap, "trap"),
+    ];
+    for (bit, name) in checks {
+        if flags.contains(bit) {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+/// Translate one `RTA_MULTIPATH` next-hop entry. Per-hop weight: the
+/// kernel stores `rtnh_hops` (weight − 1); the model carries the
+/// effective weight as iproute2 displays it.
+fn translate_next_hop(hop: &RouteNextHop, family: AddressFamily) -> NextHop {
+    let mut gateway: Option<IpAddr> = None;
+    for attribute in &hop.attributes {
+        if let RouteAttribute::Gateway(value) = attribute {
+            gateway = route_address_ip(value);
+        }
+    }
+    let _ = family; // hop gateways are validated by the kernel to match the route family
+    NextHop {
+        gateway,
+        output_interface: Some(hop.interface_index),
+        output_interface_name: None,
+        weight: Some(u16::from(hop.hops) + 1),
+        flags: Some(next_hop_flags(&hop.flags)),
+    }
+}
+
 /// Translate an `RTM_GETROUTE` dump entry into a core route.
 ///
 /// Notes:
@@ -377,9 +432,13 @@ fn route_flags(flags: &RouteFlags) -> Vec<String> {
 ///   0" (the attribute is omitted when zero), so the metric is recorded as
 ///   `Some(0)` — this is what `/proc/net/route`'s Metric column reports for
 ///   the same route, and keeps cross-source deduplication correct.
-/// * For multipath (`RTA_MULTIPATH`) routes only the first next hop is
-///   represented, with a note saying so — full multipath expansion is
-///   future work.
+/// * Multipath (`RTA_MULTIPATH`) routes carry their FULL next-hop list
+///   (WO-03 M3): every observed hop with its gateway, output interface,
+///   weight, and per-hop flags. The route-level gateway/output interface
+///   are `None` for multipath routes — the hops carry them, and multiple
+///   hops are never flattened into one gateway. An empty `RTA_MULTIPATH`
+///   (malformed kernel data) is recorded as an explicit undecodable
+///   marker rather than silently dropped.
 pub fn translate_route(message: &RouteMessage) -> Option<Route> {
     let family = nl_family(message.header.address_family)?;
 
@@ -388,7 +447,7 @@ pub fn translate_route(message: &RouteMessage) -> Option<Route> {
     let mut output_interface: Option<u32> = None;
     let mut priority: Option<u32> = None;
     let mut table: Option<u32> = None;
-    let mut multipath_hops = 0usize;
+    let mut multipath: Option<Vec<RouteNextHop>> = None;
 
     for attribute in &message.attributes {
         match attribute {
@@ -397,23 +456,7 @@ pub fn translate_route(message: &RouteMessage) -> Option<Route> {
             RouteAttribute::Oif(value) => output_interface = Some(*value),
             RouteAttribute::Priority(value) => priority = Some(*value),
             RouteAttribute::Table(value) => table = Some(*value),
-            RouteAttribute::MultiPath(next_hops) => {
-                multipath_hops = next_hops.len();
-                // Represent the first next hop when the route-level
-                // attributes do not carry it.
-                if let Some(first) = next_hops.first() {
-                    if output_interface.is_none() {
-                        output_interface = Some(first.interface_index);
-                    }
-                    if gateway.is_none() {
-                        for attr in &first.attributes {
-                            if let RouteAttribute::Gateway(value) = attr {
-                                gateway = route_address_ip(value);
-                            }
-                        }
-                    }
-                }
-            }
+            RouteAttribute::MultiPath(next_hops) => multipath = Some(next_hops.clone()),
             _ => {}
         }
     }
@@ -436,10 +479,28 @@ pub fn translate_route(message: &RouteMessage) -> Option<Route> {
         });
 
     let mut notes = Vec::new();
-    if multipath_hops > 1 {
-        notes.push(format!(
-            "multipath route with {multipath_hops} next hops; only the first is represented"
-        ));
+
+    // Multipath representation (WO-03 M3). For a decoded hop list the
+    // hops carry the gateways and output interfaces; route-level fields
+    // are cleared so the hops are never mistaken for a single gateway.
+    let next_hops = match multipath {
+        None => NextHops::Single,
+        Some(hops) if hops.is_empty() => {
+            notes.push(
+                "kernel sent RTA_MULTIPATH with no next hops (malformed); next-hop set not decodable"
+                    .to_string(),
+            );
+            NextHops::Undecoded("RTA_MULTIPATH attribute carried no next hops".to_string())
+        }
+        Some(hops) => NextHops::Multi(
+            hops.iter()
+                .map(|hop| translate_next_hop(hop, family))
+                .collect(),
+        ),
+    };
+    if matches!(next_hops, NextHops::Multi(_)) {
+        gateway = None;
+        output_interface = None;
     }
 
     let table = match table.or(Some(message.header.table as u32)) {
@@ -450,7 +511,8 @@ pub fn translate_route(message: &RouteMessage) -> Option<Route> {
     Some(Route {
         family,
         destination,
-        // `None` here is the kernel's own "no gateway" (on-link) encoding.
+        // `None` here is the kernel's own "no gateway" (on-link) encoding —
+        // except for multipath routes, where the hops carry the gateways.
         gateway,
         output_interface,
         output_interface_name: None,
@@ -460,6 +522,7 @@ pub fn translate_route(message: &RouteMessage) -> Option<Route> {
         metric: Some(priority.unwrap_or(0)),
         table,
         flags: Some(route_flags(&message.header.flags)),
+        next_hops,
         sources: vec![ObservationSource::Netlink],
         notes,
     })

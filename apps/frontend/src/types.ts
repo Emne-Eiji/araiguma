@@ -84,6 +84,26 @@ export interface IpNet {
   prefixLen: number;
 }
 
+// One observed next hop of a multipath route (RTA_MULTIPATH entry; mirror
+// of the Rust NextHop, WO-03 M3). Mirrors the route-level semantics:
+// gateway null = the kernel reported no gateway for this hop (on-link),
+// weight null = not observed (kernel rtnh_hops absent).
+export interface NextHop {
+  gateway: string | null;
+  outputInterface: number | null;
+  outputInterfaceName: string | null;
+  weight: number | null;
+  flags: string[] | null;
+}
+
+// How a route's next hops were observed (WO-03 M3, schema v3).
+// 'single' — no RTA_MULTIPATH: the route-level gateway/outputInterface ARE
+// the next hop. { multi } — every observed hop listed; route-level fields
+// are null (never flattened into one gateway). { undecoded } —
+// RTA_MULTIPATH was present but could not be decoded; reason verbatim.
+// Absent in pre-M3 documents; the loader normalizes it to 'single'.
+export type NextHops = 'single' | { multi: NextHop[] } | { undecoded: string };
+
 export interface Interface {
   ifindex: number;
   name: string;
@@ -127,6 +147,7 @@ export interface Route {
   metric: number | null;
   table: number | null;
   flags: string[] | null;
+  nextHops: NextHops;
   sources: ObservationSource[];
   notes: string[];
 }

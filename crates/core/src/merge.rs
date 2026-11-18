@@ -15,7 +15,7 @@
 use std::net::IpAddr;
 
 use crate::model::{
-    Address, AddressFamily, Interface, IpNet, MacObservation, Route, RT_TABLE_MAIN,
+    Address, AddressFamily, Interface, IpNet, MacObservation, NextHops, Route, RT_TABLE_MAIN,
 };
 use crate::provider::{ProviderObservation, ProviderReport};
 use crate::snapshot::{NetworkSnapshot, SNAPSHOT_SCHEMA_VERSION};
@@ -77,7 +77,7 @@ pub fn merge(observations: Vec<ProviderObservation>, timestamp_ms: u64) -> Netwo
     }
 
     // Enrich: make sure merged routes carry both oif ifindex and name when
-    // either is resolvable.
+    // either is resolvable — including every multipath hop (WO-03 M3).
     for route in &mut routes {
         match (
             route.output_interface,
@@ -94,6 +94,23 @@ pub fn merge(observations: Vec<ProviderObservation>, timestamp_ms: u64) -> Netwo
                 }
             }
             _ => {}
+        }
+        if let NextHops::Multi(hops) = &mut route.next_hops {
+            for hop in hops {
+                match (hop.output_interface, hop.output_interface_name.as_deref()) {
+                    (None, Some(name)) => {
+                        if let Some(ifindex) = name_to_ifindex(name) {
+                            hop.output_interface = Some(ifindex);
+                        }
+                    }
+                    (Some(ifindex), None) => {
+                        if let Some(name) = ifindex_to_name(ifindex) {
+                            hop.output_interface_name = Some(name);
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -222,73 +239,133 @@ fn merge_address(into: &mut Vec<Address>, new: Address) {
     }
 }
 
-/// The cross-provider identity of a route. A route from `/proc/net/route`
-/// (implied main table, oif by name) must deduplicate against the same
-/// kernel route observed via netlink (explicit table 254, oif by ifindex),
-/// so both representations of the output interface are normalized through
-/// the merged interface list before comparison.
+/// The group-level identity of a route (WO-03 M3): family, table,
+/// destination, and metric. A route from `/proc/net/route` (implied main
+/// table, oif by name) must deduplicate against the same kernel route
+/// observed via netlink (explicit table 254, oif by ifindex), so within a
+/// group, two observations are the SAME kernel route when their next-hop
+/// representations agree — including a multipath route observed by netlink
+/// alongside procfs's partial single-line view of it: `/proc/net/route`
+/// shows only the FIRST hop of a multipath route (verified live), so a
+/// single-path observation whose gateway/oif match any hop of a multipath
+/// observation is the same kernel fact, never a separate route.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct RouteIdentity {
+struct RouteGroupKey {
     family: AddressFamily,
     table: u32,
     destination: Option<IpNet>,
-    gateway: Option<IpAddr>,
-    oif_index: Option<u32>,
-    oif_name: Option<String>,
     metric: Option<u32>,
 }
 
-fn route_identity(
-    route: &Route,
-    ifindex_to_name: &dyn Fn(u32) -> Option<String>,
+/// A normalized next-hop identity: the gateway and the output interface
+/// INDEX (a name is resolved through the merged interface list — names are
+/// presentation, not identity; hop-name enrichment happens after the
+/// merge).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HopIdentity {
+    gateway: Option<IpAddr>,
+    oif_index: Option<u32>,
+}
+
+fn normalize_hop(
+    gateway: Option<IpAddr>,
+    oif_index: Option<u32>,
+    oif_name: Option<&str>,
     name_to_ifindex: &dyn Fn(&str) -> Option<u32>,
-) -> RouteIdentity {
-    let table = route.table.unwrap_or(RT_TABLE_MAIN as u32);
-    let oif_index = route.output_interface.or_else(|| {
-        route
-            .output_interface_name
-            .as_deref()
-            .and_then(name_to_ifindex)
-    });
-    let oif_name = route
-        .output_interface_name
-        .clone()
-        .or_else(|| route.output_interface.and_then(ifindex_to_name));
-    RouteIdentity {
+) -> HopIdentity {
+    HopIdentity {
+        gateway,
+        oif_index: oif_index.or_else(|| oif_name.and_then(name_to_ifindex)),
+    }
+}
+
+/// Every next-hop identity a route observation exposes: for a single-path
+/// route its route-level pair; for a multipath route every hop. Empty for
+/// an undecodable hop set (which only matches an identical undecodable
+/// observation).
+fn route_hops(route: &Route, name_to_ifindex: &dyn Fn(&str) -> Option<u32>) -> Vec<HopIdentity> {
+    match &route.next_hops {
+        NextHops::Single => vec![normalize_hop(
+            route.gateway,
+            route.output_interface,
+            route.output_interface_name.as_deref(),
+            name_to_ifindex,
+        )],
+        NextHops::Multi(hops) => hops
+            .iter()
+            .map(|hop| {
+                normalize_hop(
+                    hop.gateway,
+                    hop.output_interface,
+                    hop.output_interface_name.as_deref(),
+                    name_to_ifindex,
+                )
+            })
+            .collect(),
+        NextHops::Undecoded(_) => Vec::new(),
+    }
+}
+
+fn route_group_key(route: &Route) -> RouteGroupKey {
+    RouteGroupKey {
         family: route.family,
-        table,
+        table: route.table.unwrap_or(RT_TABLE_MAIN as u32),
         destination: route.destination,
-        gateway: route.gateway,
-        oif_index,
-        oif_name,
         metric: route.metric,
+    }
+}
+
+/// Whether two observations in the same group describe the same kernel
+/// route: identical undecodable markers, or overlapping next-hop sets
+/// (a partial single-hop view matches the multipath route it came from).
+fn same_kernel_route(a: &Route, b: &Route, name_to_ifindex: &dyn Fn(&str) -> Option<u32>) -> bool {
+    match (&a.next_hops, &b.next_hops) {
+        (NextHops::Undecoded(reason_a), NextHops::Undecoded(reason_b)) => reason_a == reason_b,
+        (NextHops::Undecoded(_), _) | (_, NextHops::Undecoded(_)) => false,
+        _ => {
+            let a_hops = route_hops(a, name_to_ifindex);
+            let b_hops = route_hops(b, name_to_ifindex);
+            a_hops.iter().any(|hop| b_hops.contains(hop))
+        }
     }
 }
 
 fn merge_route(
     into: &mut Vec<Route>,
     new: Route,
-    ifindex_to_name: &dyn Fn(u32) -> Option<String>,
+    _ifindex_to_name: &dyn Fn(u32) -> Option<String>,
     name_to_ifindex: &dyn Fn(&str) -> Option<u32>,
 ) {
-    let new_key = route_identity(&new, ifindex_to_name, name_to_ifindex);
-    if let Some(existing) = into
-        .iter_mut()
-        .find(|r| route_identity(r, ifindex_to_name, name_to_ifindex) == new_key)
-    {
+    let new_key = route_group_key(&new);
+    let existing_index = into
+        .iter()
+        .position(|r| route_group_key(r) == new_key && same_kernel_route(r, &new, name_to_ifindex));
+    if let Some(existing) = existing_index.map(|index| &mut into[index]) {
         merge_field(&mut existing.destination, new.destination);
-        merge_field(&mut existing.gateway, new.gateway);
-        merge_field(&mut existing.output_interface, new.output_interface);
-        merge_field(
-            &mut existing.output_interface_name,
-            new.output_interface_name,
-        );
+        // Route-level gateway/oif only exist on single-path routes; a
+        // lower-priority partial view (procfs shows the first hop of a
+        // multipath route) must never write them onto a multipath
+        // observation, where the hops carry them.
+        if existing.next_hops == NextHops::Single {
+            merge_field(&mut existing.gateway, new.gateway);
+            merge_field(&mut existing.output_interface, new.output_interface);
+            merge_field(
+                &mut existing.output_interface_name,
+                new.output_interface_name,
+            );
+        }
         merge_field(&mut existing.protocol, new.protocol);
         merge_field(&mut existing.scope, new.scope);
         merge_field(&mut existing.route_type, new.route_type);
         merge_field(&mut existing.metric, new.metric);
         merge_field(&mut existing.table, new.table);
         merge_field(&mut existing.flags, new.flags);
+        // The hop representation is never "filled" from a lower-priority
+        // provider: a multipath observation stands, and a single-path
+        // observation merging into it only adds provenance and notes.
+        if existing.next_hops == NextHops::Single && new.next_hops != NextHops::Single {
+            existing.next_hops = new.next_hops.clone();
+        }
         for note in new.notes {
             if !existing.notes.contains(&note) {
                 existing.notes.push(note);

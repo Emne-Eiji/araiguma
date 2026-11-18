@@ -138,6 +138,58 @@ function asTaggedOrOther(
   return asEnum(value, allowed, path);
 }
 
+// The next-hop representation (WO-03 M3): 'single', { multi: [...] }, or
+// { undecoded: reason }. Absence is valid (pre-M3 documents could not
+// represent multipath hop lists; the Rust model defaults the field to
+// 'single' and the loader normalizes to match). Explicit null is INVALID —
+// same discipline as macAddress: the Rust model never writes null here,
+// and a null must not silently become 'single' (parity with serde, whose
+// default applies only to an absent field). An EMPTY multi array is
+// rejected: the writer never produces one (an undecodable RTA_MULTIPATH is
+// recorded as { undecoded } instead), so an empty list can only be a
+// hand-written or corrupted document claiming a multipath observation that
+// carries no hops.
+function validateNextHops(value: unknown, family: 'ipv4' | 'ipv6', path: string): void {
+  if (value === undefined) return;
+  if (value === null) {
+    fail(
+      path,
+      'must not be null — omit the field (pre-M3 documents) or write \'single\' / { multi } / { undecoded }',
+    );
+  }
+  if (value === 'single') return;
+  if (typeof value === 'string') {
+    fail(path, `expected 'single', { multi: [...] }, or { undecoded: reason }, got ${JSON.stringify(value)}`);
+  }
+  const record = asRecord(value, path);
+  if (record.multi !== undefined) {
+    const hops = asArray(record.multi, `${path}.multi`);
+    if (hops.length === 0) {
+      fail(
+        `${path}.multi`,
+        'an empty hop list is not producible by the writer — an undecodable RTA_MULTIPATH is recorded as { undecoded } instead',
+      );
+    }
+    hops.forEach((hop, i) => {
+      const hopPath = `${path}.multi[${i}]`;
+      const hopRecord = asRecord(hop, hopPath);
+      optional((v, p) => asIpAddress(v, p, family), hopRecord.gateway, `${hopPath}.gateway`);
+      optional((v, p) => asInt(v, p, { min: 1 }), hopRecord.outputInterface, `${hopPath}.outputInterface`);
+      optional(asString, hopRecord.outputInterfaceName, `${hopPath}.outputInterfaceName`);
+      // The kernel stores rtnh_hops (weight − 1) in a u8, so the effective
+      // weight is an integer between 1 and 256 as iproute2 displays it.
+      optional((v, p) => asInt(v, p, { min: 1, max: 256 }), hopRecord.weight, `${hopPath}.weight`);
+      optional(asStringArray, hopRecord.flags, `${hopPath}.flags`);
+    });
+    return;
+  }
+  if (record.undecoded !== undefined) {
+    asNonEmptyString(record.undecoded, `${path}.undecoded`);
+    return;
+  }
+  fail(path, `expected 'single', { multi: [...] }, or { undecoded: reason }`);
+}
+
 function validateInterface(raw: unknown, path: string): void {
   const iface = asRecord(raw, path);
   asNonEmptyString(iface.name, `${path}.name`);
@@ -185,6 +237,7 @@ function validateRoute(raw: unknown, path: string): void {
   optional((v, p) => asInt(v, p, { min: 0 }), route.metric, `${path}.metric`);
   optional((v, p) => asInt(v, p, { min: 0 }), route.table, `${path}.table`);
   optional(asStringArray, route.flags, `${path}.flags`);
+  validateNextHops(route.nextHops, family, `${path}.nextHops`);
   asSources(route.sources, `${path}.sources`);
   asStringArray(route.notes, `${path}.notes`);
 }
@@ -262,7 +315,13 @@ function parseSnapshotInner(input: unknown): NetworkSnapshot {
     timestampMs: root.timestampMs as number,
     interfaces: root.interfaces as never,
     addresses: root.addresses as never,
-    routes: root.routes as never,
+    // Pre-M3 documents carry no nextHops; normalize to 'single' so every
+    // consumer can branch on the field without a null check (same default
+    // the Rust serde model applies).
+    routes: (root.routes as { nextHops?: unknown }[]).map((route) => ({
+      ...route,
+      nextHops: route.nextHops ?? 'single',
+    })) as never,
     providers: root.providers as never,
   };
 }
