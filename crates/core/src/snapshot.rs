@@ -59,8 +59,8 @@ impl NetworkSnapshot {
     }
 
     /// Distinct routing-table ids present in the observation.
-    pub fn tables(&self) -> Vec<u8> {
-        let mut tables: Vec<u8> = self.routes.iter().filter_map(|r| r.table).collect();
+    pub fn tables(&self) -> Vec<u32> {
+        let mut tables: Vec<u32> = self.routes.iter().filter_map(|r| r.table).collect();
         tables.sort_unstable();
         tables.dedup();
         tables
@@ -143,7 +143,7 @@ pub fn interface_changed_fields(old: &Interface, new: &Interface) -> Vec<String>
 /// Canonical route identity for diffing (sources and notes excluded).
 type RouteKey = (
     AddressFamily,
-    Option<u8>,
+    Option<u32>,
     Option<crate::model::IpNet>,
     Option<std::net::IpAddr>,
     Option<u32>,

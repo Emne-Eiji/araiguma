@@ -181,7 +181,7 @@ impl SysFsProvider {
                 scope: None,
                 route_type: None,
                 metric: Some(entry.metric),
-                table: Some(RT_TABLE_MAIN),
+                table: Some(RT_TABLE_MAIN as u32),
                 flags: None,
                 sources: vec![ObservationSource::ProcFs],
                 notes: vec![NOTE_TABLE_IMPLIED.to_string()],

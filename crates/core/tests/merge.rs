@@ -40,7 +40,7 @@ fn v4_route(dst: &str, prefix: u8, gateway: Option<IpAddr>, oif: Option<u32>) ->
         scope: None,
         route_type: Some(RouteType::Unicast),
         metric: Some(0),
-        table: Some(RT_TABLE_MAIN),
+        table: Some(RT_TABLE_MAIN as u32),
         flags: None,
         sources: vec![],
         notes: vec![],
@@ -156,7 +156,7 @@ fn route_dedup_across_netlink_and_procfs() {
     let mut proc_route = v4_route("192.168.0.0", 24, None, None);
     proc_route.gateway = Some(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1)));
     proc_route.output_interface_name = Some("eth0".into());
-    proc_route.table = Some(RT_TABLE_MAIN);
+    proc_route.table = Some(RT_TABLE_MAIN as u32);
     proc_route
         .notes
         .push("table implied: /proc/net/route exposes only the main table (254)".into());
@@ -188,7 +188,7 @@ fn local_table_routes_are_kept_and_never_merged_into_main() {
     nl_iface.sources = vec![ObservationSource::Netlink];
     netlink.interfaces = SectionResult::Observed(vec![nl_iface]);
     let mut local = v4_route("192.168.0.42", 32, None, Some(2));
-    local.table = Some(RT_TABLE_LOCAL);
+    local.table = Some(RT_TABLE_LOCAL as u32);
     local.sources = vec![ObservationSource::Netlink];
     netlink.routes_v4 = SectionResult::Observed(vec![local]);
 
@@ -198,16 +198,16 @@ fn local_table_routes_are_kept_and_never_merged_into_main() {
     sysfs.interfaces = SectionResult::Observed(vec![s_iface]);
     let mut proc_route = v4_route("192.168.0.42", 32, None, None);
     proc_route.output_interface_name = Some("eth0".into());
-    proc_route.table = Some(RT_TABLE_MAIN);
+    proc_route.table = Some(RT_TABLE_MAIN as u32);
     proc_route.sources = vec![ObservationSource::ProcFs];
     sysfs.routes_v4 = SectionResult::Observed(vec![proc_route]);
 
     let snapshot = merge(vec![netlink, sysfs], 1);
     // Different tables are different routes: both must be preserved.
     assert_eq!(snapshot.routes.len(), 2);
-    let tables: Vec<u8> = snapshot.routes.iter().filter_map(|r| r.table).collect();
-    assert!(tables.contains(&RT_TABLE_MAIN));
-    assert!(tables.contains(&RT_TABLE_LOCAL));
+    let tables: Vec<u32> = snapshot.routes.iter().filter_map(|r| r.table).collect();
+    assert!(tables.contains(&(RT_TABLE_MAIN as u32)));
+    assert!(tables.contains(&(RT_TABLE_LOCAL as u32)));
 }
 
 #[test]

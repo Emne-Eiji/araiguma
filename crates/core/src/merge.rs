@@ -118,10 +118,10 @@ pub fn merge(observations: Vec<ProviderObservation>, timestamp_ms: u64) -> Netwo
     }
 }
 
-fn route_sort_key(route: &Route) -> (u8, u8, u8, Option<IpNet>, Option<u32>, Option<IpAddr>) {
+fn route_sort_key(route: &Route) -> (u8, u32, u8, Option<IpNet>, Option<u32>, Option<IpAddr>) {
     (
         route.family as u8,
-        route.table.unwrap_or(RT_TABLE_MAIN),
+        route.table.unwrap_or(RT_TABLE_MAIN as u32),
         // default routes first within a table
         u8::MAX - route.destination.as_ref().map_or(0, |d| d.prefix_len),
         route.destination,
@@ -192,7 +192,7 @@ fn merge_address(into: &mut Vec<Address>, new: Address) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RouteIdentity {
     family: AddressFamily,
-    table: u8,
+    table: u32,
     destination: Option<IpNet>,
     gateway: Option<IpAddr>,
     oif_index: Option<u32>,
@@ -205,7 +205,7 @@ fn route_identity(
     ifindex_to_name: &dyn Fn(u32) -> Option<String>,
     name_to_ifindex: &dyn Fn(&str) -> Option<u32>,
 ) -> RouteIdentity {
-    let table = route.table.unwrap_or(RT_TABLE_MAIN);
+    let table = route.table.unwrap_or(RT_TABLE_MAIN as u32);
     let oif_index = route.output_interface.or_else(|| {
         route
             .output_interface_name

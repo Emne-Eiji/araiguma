@@ -295,18 +295,20 @@ pub enum RouteScope {
     Link,
     Host,
     Nowhere,
+    /// A recognized-but-unmapped scope id (kept verbatim, never guessed).
+    Other(u8),
 }
 
 impl RouteScope {
-    pub fn from_raw(v: u8) -> Option<Self> {
-        Some(match v {
+    pub fn from_raw(v: u8) -> Self {
+        match v {
             0 => Self::Universe,
             200 => Self::Site,
             253 => Self::Link,
             254 => Self::Host,
             255 => Self::Nowhere,
-            _ => return None,
-        })
+            other => Self::Other(other),
+        }
     }
 }
 
@@ -326,11 +328,13 @@ pub enum RouteType {
     Throw,
     Nat,
     Xresolve,
+    /// A recognized-but-unmapped type id (kept verbatim, never guessed).
+    Other(u8),
 }
 
 impl RouteType {
-    pub fn from_raw(v: u8) -> Option<Self> {
-        Some(match v {
+    pub fn from_raw(v: u8) -> Self {
+        match v {
             0 => Self::Unspec,
             1 => Self::Unicast,
             2 => Self::Local,
@@ -343,8 +347,8 @@ impl RouteType {
             9 => Self::Throw,
             10 => Self::Nat,
             11 => Self::Xresolve,
-            _ => return None,
-        })
+            other => Self::Other(other),
+        }
     }
 }
 
@@ -428,7 +432,9 @@ pub struct Route {
     pub metric: Option<u32>,
     /// Routing table id. `/proc/net/route` exposes only the main table, so
     /// procfs routes are recorded with `table = Some(254)` plus a note.
-    pub table: Option<u8>,
+    /// u32 because the kernel's RTA_TABLE carries extended table ids
+    /// beyond the u8 rtm_table compat field.
+    pub table: Option<u32>,
     /// Kernel route flags as lowercase names; `None` = not observed.
     pub flags: Option<Vec<String>>,
     pub sources: Vec<ObservationSource>,
