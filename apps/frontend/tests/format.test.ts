@@ -58,6 +58,27 @@ describe('interfaceStateChip', () => {
       'unknown',
     );
   });
+
+  it('lowerLayerDown and notPresent are explicitly down, never "unknown state"', () => {
+    // WO-02 correction §9.1: the Overview chips must agree with the
+    // topology projection — these states are not operational, and the
+    // label says which one it is.
+    const lld = interfaceStateChip(iface({ operState: 'lowerLayerDown', adminState: 'up' }));
+    expect(lld).toEqual({ label: 'lower layer down', tone: 'down' });
+    const np = interfaceStateChip(iface({ operState: 'notPresent', adminState: 'up' }));
+    expect(np).toEqual({ label: 'not present', tone: 'down' });
+  });
+
+  it('dormant and testing remain explicitly labeled unknown-tone states', () => {
+    expect(interfaceStateChip(iface({ operState: 'dormant', adminState: 'up' }))).toEqual({
+      label: 'dormant',
+      tone: 'unknown',
+    });
+    expect(interfaceStateChip(iface({ operState: 'testing', adminState: 'up' }))).toEqual({
+      label: 'testing',
+      tone: 'unknown',
+    });
+  });
 });
 
 describe('formatters', () => {

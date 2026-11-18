@@ -21,10 +21,13 @@ export interface StateChip {
 }
 
 // Derive the interface state chip from observed admin/oper state.
-// Semantics (mirrors docs/discovery-notes.md):
+// Semantics (mirrors docs/discovery-notes.md and the topology projection's
+// node_state — the two views must never disagree):
 // - admin down => down (regardless of operstate)
 // - operstate up => up
-// - operstate down => down
+// - operstate down / lowerLayerDown / notPresent => down: none of these is
+//   operational, and lowerLayerDown/notPresent are labeled explicitly
+//   (never silently folded into "unknown state" or presented as up)
 // - operstate unknown + admin up => unknown (e.g. loopback and dummy
 //   devices report UNKNOWN even when functional — never shown as "up")
 export function interfaceStateChip(iface: Interface): StateChip {
@@ -36,12 +39,19 @@ export function interfaceStateChip(iface: Interface): StateChip {
       return { label: 'up', tone: 'up' };
     case 'down':
       return { label: 'down', tone: 'down' };
+    case 'lowerLayerDown':
+      // The interface is down because a layer below it is down (e.g. a
+      // bridge port whose member link is down).
+      return { label: 'lower layer down', tone: 'down' };
+    case 'notPresent':
+      // RFC 2863: the component is physically absent.
+      return { label: 'not present', tone: 'down' };
     case 'dormant':
       return { label: 'dormant', tone: 'unknown' };
     case 'testing':
       return { label: 'testing', tone: 'unknown' };
     default:
-      // unknown, notPresent, lowerLayerDown, or not observed
+      // unknown, or not observed
       return { label: 'unknown state', tone: 'unknown' };
   }
 }

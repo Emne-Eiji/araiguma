@@ -117,6 +117,15 @@ fn kind_detail_string(kind: &InfoKind) -> String {
 ///   `LinkInfo::Data(InfoData::Veth(InfoVeth::Peer(..)))` on kernels that
 ///   fill veth info; the model does not carry them yet — they are skipped
 ///   here and revisited when topology work needs veth pairing.
+/// * Classification: a recognized `IFLA_INFO_KIND` string wins. An
+///   **unrecognized** kind string proves the device is a specific kind
+///   this model does not map: the raw string is preserved in `kind_detail`,
+///   the classification stays `Other` with an explicit note, and the
+///   ARPHRD fallback is deliberately NOT consulted — an unrecognized
+///   virtual device whose hardware type happens to be ARPHRD_ETHER would
+///   otherwise be confidently misclassified as Ethernet. The fallback
+///   applies only when the kernel exposed no kind string at all (typical
+///   for physical devices).
 pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
     if message.header.index == 0 {
         return None;
@@ -132,6 +141,7 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
     let mut oper_state: Option<OperState> = None;
     let mut kind: Option<InterfaceKind> = None;
     let mut kind_detail: Option<String> = None;
+    let mut kind_string_unmapped = false;
 
     for attribute in &message.attributes {
         match attribute {
@@ -145,7 +155,10 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
             LinkAttribute::LinkInfo(infos) => {
                 for info in infos {
                     if let netlink_packet_route::link::LinkInfo::Kind(info_kind) = info {
-                        kind = map_info_kind(info_kind);
+                        match map_info_kind(info_kind) {
+                            Some(mapped) => kind = Some(mapped),
+                            None => kind_string_unmapped = true,
+                        }
                         kind_detail = Some(kind_detail_string(info_kind));
                     }
                 }
@@ -154,13 +167,24 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
         }
     }
 
-    let kind =
-        kind.unwrap_or_else(|| InterfaceKind::from_arphrd(message.header.link_layer_type as u16));
+    let kind = match kind {
+        Some(mapped) => mapped,
+        None if kind_string_unmapped => InterfaceKind::Other,
+        None => InterfaceKind::from_arphrd(message.header.link_layer_type as u16),
+    };
     let admin_state = Some(if message.header.flags.contains(LinkFlags::Up) {
         AdminState::Up
     } else {
         AdminState::Down
     });
+
+    let mut notes = Vec::new();
+    if kind_string_unmapped {
+        notes.push(format!(
+            "unrecognized link kind \"{}\"; classification uncertain — raw kind preserved, not guessed from the hardware type",
+            kind_detail.as_deref().unwrap_or("?")
+        ));
+    }
 
     // MAC observation (v2). Within a successfully dumped link message, an
     // absent or empty IFLA_ADDRESS is the kernel stating the device has no
@@ -187,7 +211,7 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
         master_ifindex,
         parent_ifindex,
         sources: vec![ObservationSource::Netlink],
-        notes: Vec::new(),
+        notes,
     })
 }
 
@@ -467,6 +491,46 @@ mod tests {
             MacObservation::Absent,
             "no address attribute"
         );
+    }
+
+    #[test]
+    fn unrecognized_link_kind_stays_other_with_the_raw_kind() {
+        // WO-02 correction §9.2: an unknown IFLA_INFO_KIND on a device whose
+        // hardware type is ARPHRD_ETHER must NOT be confidently classified
+        // as Ethernet — the device is a specific (virtual) kind the model
+        // does not map, and that uncertainty is exposed.
+        let mut message = link_message(); // link_layer_type: Ether
+        message.attributes = vec![
+            LinkAttribute::IfName("weird0".into()),
+            LinkAttribute::LinkInfo(vec![LinkInfo::Kind(InfoKind::Other("weird0".into()))]),
+        ];
+        let interface = translate_link(&message).expect("valid link");
+        assert_eq!(interface.kind, InterfaceKind::Other, "never guessed");
+        assert_eq!(
+            interface.kind_detail.as_deref(),
+            Some("weird0"),
+            "raw kind preserved"
+        );
+        assert!(interface
+            .notes
+            .iter()
+            .any(|n| n.contains("unrecognized link kind \"weird0\"")));
+        assert!(interface
+            .notes
+            .iter()
+            .any(|n| n.contains("classification uncertain")));
+    }
+
+    #[test]
+    fn arphrd_fallback_is_legitimate_without_any_kind_string() {
+        // No LinkInfo at all: a plain physical Ethernet device — the ARPHRD
+        // fallback is the only available evidence and applies, without a
+        // caveat note.
+        let mut message = link_message(); // Ether + no LinkInfo
+        message.attributes = vec![LinkAttribute::IfName("enp3s0".into())];
+        let interface = translate_link(&message).expect("valid link");
+        assert_eq!(interface.kind, InterfaceKind::Ethernet);
+        assert!(interface.notes.is_empty());
     }
 
     #[test]
