@@ -174,6 +174,8 @@ export type TopologyNodeState = 'active' | 'inactive' | 'unknown';
 
 export type TopologyEdgeKind =
   | 'bridgeMember'
+  | 'bondMember'
+  | 'masterMember'
   | 'linkParent'
   | 'gatewayRoute'
   | 'gatewayInferred';

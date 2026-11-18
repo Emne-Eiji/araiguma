@@ -121,7 +121,15 @@ function interfaceKindLabel(kind: string): string {
 export function edgeKindLabel(kind: TopologyEdgeKind): string {
   switch (kind) {
     case 'bridgeMember':
+      // Only where the master's own kind was observed as a bridge.
       return 'bridge port';
+    case 'bondMember':
+      // Only where the master's own kind was observed as a bond.
+      return 'bond member';
+    case 'masterMember':
+      // The kernel named the master, but its type was not established —
+      // never assumed to be a bridge.
+      return 'port of master (type not established)';
     case 'linkParent':
       return 'parent link';
     case 'gatewayRoute':

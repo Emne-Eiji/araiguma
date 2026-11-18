@@ -417,7 +417,7 @@
           "source": "netlink"
         }
       },
-      "detail": "interface is a port of its master (IFLA_MASTER)"
+      "detail": "interface is a port of its master (IFLA_MASTER); master observed as a bridge"
     },
     {
       "from": {

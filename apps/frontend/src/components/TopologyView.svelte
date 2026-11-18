@@ -99,7 +99,8 @@
       style: { 'line-style': 'dashed', 'line-color': '#3c5a74', 'target-arrow-color': '#3c5a74' },
     },
     {
-      selector: 'edge[kind = "bridgeMember"], edge[kind = "linkParent"]',
+      selector:
+        'edge[kind = "bridgeMember"], edge[kind = "bondMember"], edge[kind = "masterMember"], edge[kind = "linkParent"]',
       style: { 'line-color': '#41507a', 'target-arrow-color': '#41507a' },
     },
     {

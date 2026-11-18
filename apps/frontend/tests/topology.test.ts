@@ -94,6 +94,14 @@ describe('topology display helpers', () => {
     expect(evidenceLabel({ inferred: { reason: 'because' } })).toContain('because');
   });
 
+  it('labels master relationships by their established flavor only', () => {
+    // WO-02 correction §6: a bond member must never be called a bridge
+    // port, and an unestablished master type stays neutral.
+    expect(edgeKindLabel('bondMember')).toBe('bond member');
+    expect(edgeKindLabel('masterMember')).toBe('port of master (type not established)');
+    expect(edgeKindLabel('bridgeMember')).toBe('bridge port');
+  });
+
   it('computes stable node keys', () => {
     expect(nodeIdKey({ interface: { ifindex: 2 } })).toBe('if:2');
     expect(nodeIdKey({ gateway: { address: '10.0.0.1' } })).toBe('gw:10.0.0.1');

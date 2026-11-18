@@ -9,11 +9,14 @@
 //! * Gateway nodes exist only when a route explicitly names a next-hop IP.
 //!   There are deliberately **no** internet/upstream/cloud nodes: nothing in
 //!   the observation model can prove an upstream, so none is invented.
-//! * Edges require evidence: `bridgeMember` and `vlanParent`/
-//!   `tunnelUnderlay` from the kernel's own master/parent statements,
-//!   `gatewayRoute` from a main-table route naming both oif and gateway,
-//!   and `gatewayInferred` only when a gateway without an oif falls inside
-//!   exactly one interface's subnet (the derivation is recorded).
+//! * Edges require evidence: `bridgeMember`/`bondMember`/`masterMember`
+//!   from the kernel's own master statements — the relationship exists
+//!   because IFLA_MASTER names the master, and its flavor (bridge port,
+//!   bond member, or neutral) comes from the master's own kind
+//!   observation, never from an assumption; `linkParent` from IFLA_LINK;
+//!   `gatewayRoute` from a main-table route naming both oif and gateway;
+//!   and `gatewayInferred` only when a gateway without an oif falls
+//!   inside exactly one interface's subnet (the derivation is recorded).
 //! * Relationships that cannot be established (VPN peer, upstream beyond a
 //!   gateway) stay **unknown**: they appear as node annotations, never as
 //!   fabricated edges.
@@ -60,9 +63,20 @@ pub enum NodeState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EdgeKind {
-    /// Interface is a bridge/bond port of the master interface
-    /// (IFLA_MASTER / sysfs master).
+    /// Interface is a port of a master interface that the observation
+    /// established to be a **bridge** (IFLA_MASTER / sysfs `master`, plus
+    /// the master's own kind being Bridge).
     BridgeMember,
+    /// Interface is a member of a master interface that the observation
+    /// established to be a **bond**. IFLA_MASTER is shared between bridges
+    /// and bonds; only the master's own kind observation separates them —
+    /// a master is never assumed to be a bridge.
+    BondMember,
+    /// Interface is a port of a master interface whose type could not be
+    /// established. The kernel states the relationship (IFLA_MASTER), so
+    /// the edge exists, but its flavor stays unknown and is presented
+    /// neutrally.
+    MasterMember,
     /// Interface's parent link (IFLA_LINK): vlan parent, tunnel underlay,
     /// or another link-layer parent.
     LinkParent,
@@ -163,24 +177,66 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
     }
 
     // 2. Structural edges from the kernel's own master/parent statements.
+    //    A master relationship's FLAVOR comes from the master's own kind
+    //    observation (bridge / bond); without that evidence the edge is
+    //    presented neutrally as a master/member relationship — a master is
+    //    never assumed to be a bridge.
     for iface in &snapshot.interfaces {
         if let Some(master) = iface.master_ifindex {
-            if snapshot.interface_by_ifindex(master).is_some() {
+            if master == iface.ifindex {
+                annotate_interface(
+                    &mut nodes,
+                    iface.ifindex,
+                    format!(
+                        "names itself as master (ifindex {master}) — an invalid reference; no relationship drawn"
+                    ),
+                );
+            } else if let Some(master_iface) = snapshot.interface_by_ifindex(master) {
+                let (edge_kind, flavor) = match master_iface.kind {
+                    InterfaceKind::Bridge => {
+                        (EdgeKind::BridgeMember, "master observed as a bridge")
+                    }
+                    InterfaceKind::Bond => (EdgeKind::BondMember, "master observed as a bond"),
+                    _ => (
+                        EdgeKind::MasterMember,
+                        "the master's type is not established",
+                    ),
+                };
                 edges.push(TopologyEdge {
                     from: NodeId::Interface {
                         ifindex: iface.ifindex,
                     },
                     to: NodeId::Interface { ifindex: master },
-                    edge_kind: EdgeKind::BridgeMember,
+                    edge_kind,
                     evidence: Evidence::Observed {
                         source: primary_source(&iface.sources),
                     },
-                    detail: Some("interface is a port of its master (IFLA_MASTER)".into()),
+                    detail: Some(format!(
+                        "interface is a port of its master (IFLA_MASTER); {flavor}"
+                    )),
                 });
+            } else {
+                // The master itself is unobserved: keep the member node,
+                // record the unknown, draw no dangling edge.
+                annotate_interface(
+                    &mut nodes,
+                    iface.ifindex,
+                    format!(
+                        "names master ifindex {master}, which is not part of this observation (no relationship drawn)"
+                    ),
+                );
             }
         }
         if let Some(parent) = iface.parent_ifindex {
-            if snapshot.interface_by_ifindex(parent).is_some() {
+            if parent == iface.ifindex {
+                annotate_interface(
+                    &mut nodes,
+                    iface.ifindex,
+                    format!(
+                        "names itself as parent link (ifindex {parent}) — an invalid reference; no relationship drawn"
+                    ),
+                );
+            } else if snapshot.interface_by_ifindex(parent).is_some() {
                 let flavor = match iface.kind {
                     InterfaceKind::Tunnel => "tunnel underlay (IFLA_LINK)",
                     InterfaceKind::Vlan => "vlan parent (IFLA_LINK)",
@@ -197,6 +253,14 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
                     },
                     detail: Some(flavor.to_string()),
                 });
+            } else {
+                annotate_interface(
+                    &mut nodes,
+                    iface.ifindex,
+                    format!(
+                        "names parent link ifindex {parent}, which is not part of this observation (no relationship drawn)"
+                    ),
+                );
             }
         }
     }
@@ -413,6 +477,19 @@ fn annotate_gateway(nodes: &mut Vec<TopologyNode>, gateway: IpAddr, note: String
     if let Some(node) = nodes
         .iter_mut()
         .find(|n| n.id == NodeId::Gateway { address: gateway })
+    {
+        if !node.annotations.contains(&note) {
+            node.annotations.push(note);
+        }
+    }
+}
+
+/// Attach an honest annotation to an interface node (unknown relationships,
+/// invalid references) without fabricating an edge.
+fn annotate_interface(nodes: &mut [TopologyNode], ifindex: u32, note: String) {
+    if let Some(node) = nodes
+        .iter_mut()
+        .find(|n| n.id == NodeId::Interface { ifindex })
     {
         if !node.annotations.contains(&note) {
             node.annotations.push(note);

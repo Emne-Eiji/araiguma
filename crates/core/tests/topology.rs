@@ -298,6 +298,169 @@ use araiguma_core::model::{
     Route, RouteProtocol, RouteScope, RouteType,
 };
 
+#[test]
+fn master_relationships_classified_by_the_masters_own_kind() {
+    // WO-02 correction §6: IFLA_MASTER names the master, but only the
+    // master's OWN kind observation decides the flavor. A master is never
+    // assumed to be a bridge.
+    let mut snapshot = fixture("empty");
+    let mut bridge = interface_fixture(2, "br0", "other");
+    bridge.kind = InterfaceKind::Bridge;
+    let mut bond = interface_fixture(3, "bond0", "other");
+    bond.kind = InterfaceKind::Bond;
+    let mut team = interface_fixture(4, "team0", "other"); // unclassified master type
+    team.kind = InterfaceKind::Other;
+    let mut port_of_bridge = interface_fixture(10, "eth1", "ethernet");
+    port_of_bridge.master_ifindex = Some(2);
+    let mut member_of_bond = interface_fixture(11, "eth2", "ethernet");
+    member_of_bond.master_ifindex = Some(3);
+    let mut member_of_team = interface_fixture(12, "eth3", "ethernet");
+    member_of_team.master_ifindex = Some(4);
+    snapshot.interfaces = vec![
+        bridge,
+        bond,
+        team,
+        port_of_bridge,
+        member_of_bond,
+        member_of_team,
+    ];
+
+    let doc = build_topology(&snapshot);
+
+    let bridge_edges: Vec<_> = doc
+        .edges
+        .iter()
+        .filter(|e| e.edge_kind == EdgeKind::BridgeMember)
+        .collect();
+    assert_eq!(bridge_edges.len(), 1, "one bridge port edge");
+    assert_eq!(bridge_edges[0].from, interface(10));
+    assert_eq!(bridge_edges[0].to, interface(2));
+    assert!(bridge_edges[0]
+        .detail
+        .as_deref()
+        .unwrap()
+        .contains("master observed as a bridge"));
+
+    let bond_edges: Vec<_> = doc
+        .edges
+        .iter()
+        .filter(|e| e.edge_kind == EdgeKind::BondMember)
+        .collect();
+    assert_eq!(bond_edges.len(), 1, "one bond member edge");
+    assert_eq!(bond_edges[0].from, interface(11));
+    assert_eq!(bond_edges[0].to, interface(3));
+    assert!(bond_edges[0]
+        .detail
+        .as_deref()
+        .unwrap()
+        .contains("master observed as a bond"));
+
+    let neutral_edges: Vec<_> = doc
+        .edges
+        .iter()
+        .filter(|e| e.edge_kind == EdgeKind::MasterMember)
+        .collect();
+    assert_eq!(neutral_edges.len(), 1, "one neutral master/member edge");
+    assert_eq!(neutral_edges[0].from, interface(12));
+    assert_eq!(neutral_edges[0].to, interface(4));
+    assert!(neutral_edges[0]
+        .detail
+        .as_deref()
+        .unwrap()
+        .contains("the master's type is not established"));
+}
+
+#[test]
+fn missing_master_interface_keeps_the_member_and_records_the_unknown() {
+    // The member names a master that is not part of the observation: the
+    // member node stays, the limitation is annotated, and no dangling edge
+    // is fabricated (the peer may be unobserved for many reasons).
+    let mut snapshot = fixture("empty");
+    let mut orphan = interface_fixture(10, "eth9", "ethernet");
+    orphan.master_ifindex = Some(99); // not in this observation
+    let mut orphan_parent = interface_fixture(11, "eth9.100", "other");
+    orphan_parent.kind = InterfaceKind::Vlan;
+    orphan_parent.parent_ifindex = Some(99); // also not observed
+    snapshot.interfaces = vec![orphan, orphan_parent];
+
+    let doc = build_topology(&snapshot);
+
+    assert!(
+        doc.edges
+            .iter()
+            .all(|e| e.edge_kind == EdgeKind::GatewayRoute
+                || e.edge_kind == EdgeKind::GatewayInferred),
+        "no structural edges to unobserved interfaces: {:?}",
+        doc.edges
+    );
+    let eth9 = doc.nodes.iter().find(|n| n.label == "eth9").unwrap();
+    assert!(eth9
+        .annotations
+        .iter()
+        .any(|a| a.contains("names master ifindex 99, which is not part of this observation")));
+    let vlan = doc.nodes.iter().find(|n| n.label == "eth9.100").unwrap();
+    assert!(
+        vlan.annotations
+            .iter()
+            .any(|a| a
+                .contains("names parent link ifindex 99, which is not part of this observation"))
+    );
+}
+
+#[test]
+fn self_referential_master_and_parent_are_invalid_not_edges() {
+    let mut snapshot = fixture("empty");
+    let mut self_master = interface_fixture(10, "weird0", "ethernet");
+    self_master.master_ifindex = Some(10); // itself
+    let mut self_parent = interface_fixture(11, "weird1", "ethernet");
+    self_parent.parent_ifindex = Some(11); // itself
+    snapshot.interfaces = vec![self_master, self_parent];
+
+    let doc = build_topology(&snapshot);
+
+    assert!(
+        !doc.edges.iter().any(|e| e.from == e.to),
+        "a self-referential relationship is never drawn as an edge"
+    );
+    let weird0 = doc.nodes.iter().find(|n| n.label == "weird0").unwrap();
+    assert!(weird0
+        .annotations
+        .iter()
+        .any(|a| a.contains("names itself as master")));
+    let weird1 = doc.nodes.iter().find(|n| n.label == "weird1").unwrap();
+    assert!(weird1
+        .annotations
+        .iter()
+        .any(|a| a.contains("names itself as parent link")));
+}
+
+#[test]
+fn bond_members_are_never_labeled_bridge_ports() {
+    // The exact defect from the review: a bond member rendered as a
+    // "bridge port". With the corrected classification the bond edge is
+    // BondMember and the bridge edge is BridgeMember — the two never mix.
+    let mut snapshot = fixture("empty");
+    let mut bridge = interface_fixture(2, "br0", "other");
+    bridge.kind = InterfaceKind::Bridge;
+    let mut bond = interface_fixture(3, "bond0", "other");
+    bond.kind = InterfaceKind::Bond;
+    let mut p1 = interface_fixture(10, "eth1", "ethernet");
+    p1.master_ifindex = Some(2);
+    let mut p2 = interface_fixture(11, "eth2", "ethernet");
+    p2.master_ifindex = Some(3);
+    snapshot.interfaces = vec![bridge, bond, p1, p2];
+
+    let doc = build_topology(&snapshot);
+    for edge in &doc.edges {
+        if edge.to == interface(3) {
+            assert_eq!(edge.edge_kind, EdgeKind::BondMember);
+        }
+        if edge.to == interface(2) {
+            assert_eq!(edge.edge_kind, EdgeKind::BridgeMember);
+        }
+    }
+}
+
 fn interface_fixture(ifindex: u32, name: &str, kind: &str) -> Interface {
     Interface {
         ifindex,
