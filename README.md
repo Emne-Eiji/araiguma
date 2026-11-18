@@ -11,9 +11,12 @@ environment as it is — including what it *could not* observe.
 
 > **Status:** WO-01R foundation reconstructed and validated; WO-02
 > (topology, main-table route presentation, provider status) implemented
-> and validated. See `docs/work-orders/wo-01r-wo-02-closeout.md`. The
-> original WO-01 repository was lost to a sandbox persistence incident on
-> 2026-11-18 and was rebuilt under a fresh history — see
+> and validated; WO-03 (document import, veth peers, full multipath,
+> IPv6 procfs fallback) implemented and validated — see
+> `docs/work-orders/wo-01r-wo-02-closeout.md` and
+> `docs/work-orders/wo-03-closeout.md`. The original WO-01 repository was
+> lost to a sandbox persistence incident on 2026-11-18 and was rebuilt
+> under a fresh history — see
 > `docs/incident-2026-11-18-repository-loss.md`.
 
 ## What exists today
@@ -24,19 +27,23 @@ environment as it is — including what it *could not* observe.
   (netlink primary, sysfs/procfs fills gaps, failures degrade without
   destroying observations); snapshot diffing.
 - **rtnetlink provider** (`crates/netlink`): read-only dumps of links,
-  addresses, and routes (all tables), kernel-faithful translation, and a
-  multicast change monitor with exponential-backoff reconnect and explicit
-  resynchronization.
+  addresses, and routes (all tables, full multipath hop sets),
+  kernel-faithful translation, and a multicast change monitor with
+  exponential-backoff reconnect and explicit resynchronization.
 - **sysfs/procfs provider** (`crates/sysfs`): fallback observations with
-  honestly-reported classification limits.
+  honestly-reported classification limits — `/sys/class/net`,
+  `/proc/net/if_inet6`, `/proc/net/route`, and `/proc/net/ipv6_route`.
 - **CLI** (`crates/cli`): `araiguma snapshot [--pretty]` and
   `araiguma watch` (NDJSON events).
 - **Frontend** (`apps/frontend`): Svelte 5 + TypeScript + Vite; dark design
   system, 56 px icon rail, ≥96% central workspace, overlay details panels,
   persistent MOCK DATA badge. Views: interface overview, interactive
   topology (Cytoscape, evidence-driven), main-table routes with an explicit
-  table filter, provider status. Today it renders clearly-labeled synthetic
-  fixtures that are schema-locked against the Rust model from both sides.
+  table filter and full multipath hop lists in the details, provider
+  status. Synthetic fixtures render clearly-labeled by default; actual
+  observation documents exported by the CLI import through the file input
+  (validated at the document boundary, provenance shown, explicit
+  non-live-connection notice, one click back to the labeled fixtures).
 - **Topology projection** (`crates/core::topology` + `araiguma topology`):
   a pure, deterministic projection of a snapshot into nodes and edges that
   exist only with evidence — observed vs inferred relations distinguished,
