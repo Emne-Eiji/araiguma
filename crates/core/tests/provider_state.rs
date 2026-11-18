@@ -90,3 +90,86 @@ fn report_summarizes_section_outcomes() {
         araiguma_core::provider::SectionKind::RoutesV4
     );
 }
+
+// ── NotObserved semantics (WO-02 correction §7) ─────────────────────────────
+// An unattempted observation is not proof of unsupported functionality, and
+// provider health is never claimed from missing observations.
+
+#[test]
+fn all_not_observed_is_not_yet_observed_not_not_supported() {
+    let mut o = base();
+    o.interfaces = SectionResult::NotObserved;
+    o.addresses_v4 = SectionResult::NotObserved;
+    o.addresses_v6 = SectionResult::NotObserved;
+    o.routes_v4 = SectionResult::NotObserved;
+    o.routes_v6 = SectionResult::NotObserved;
+    assert_eq!(o.state(), ProviderState::NotYetObserved);
+}
+
+#[test]
+fn mixed_observed_and_not_observed_is_partial_never_available() {
+    let mut o = base();
+    o.interfaces = SectionResult::Observed(vec![]);
+    o.routes_v4 = SectionResult::Observed(vec![]);
+    o.addresses_v6 = SectionResult::NotObserved; // never attempted
+    assert_eq!(
+        o.state(),
+        ProviderState::Partial,
+        "a run with unattempted sections is incomplete, not healthy"
+    );
+}
+
+#[test]
+fn mixed_observed_unsupported_and_not_observed_is_partial() {
+    let mut o = base();
+    o.interfaces = SectionResult::Observed(vec![]);
+    o.addresses_v4 = SectionResult::Unsupported; // impossible in principle
+    o.routes_v6 = SectionResult::NotObserved; // possible but unattempted
+    assert_eq!(
+        o.state(),
+        ProviderState::Partial,
+        "the unattempted supported section keeps the run incomplete"
+    );
+}
+
+#[test]
+fn not_observed_alongside_failures_stays_partial() {
+    let mut o = base();
+    o.interfaces = SectionResult::Observed(vec![]);
+    o.routes_v4 = SectionResult::Failed("dump interrupted".into());
+    o.routes_v6 = SectionResult::NotObserved;
+    assert_eq!(o.state(), ProviderState::Partial);
+}
+
+#[test]
+fn all_unsupported_plus_not_observed_is_not_yet_observed() {
+    // Nothing ran at all; the provider is not "not supported here" — it
+    // simply was never queried (its one supportable section is unattempted).
+    let mut o = base();
+    o.addresses_v4 = SectionResult::NotObserved;
+    assert_eq!(o.state(), ProviderState::NotYetObserved);
+}
+
+#[test]
+fn unsupported_sections_do_not_lower_an_otherwise_complete_run() {
+    // The sysfs shape: sections impossible in principle (addresses_v4,
+    // routes_v6) coexist with fully observed sections.
+    let mut o = base();
+    o.interfaces = SectionResult::Observed(vec![]);
+    o.addresses_v6 = SectionResult::Observed(vec![]);
+    o.routes_v4 = SectionResult::Observed(vec![]);
+    assert_eq!(o.state(), ProviderState::Available);
+    o.fidelity_limited = true;
+    assert_eq!(o.state(), ProviderState::Degraded);
+}
+
+#[test]
+fn failure_dominates_fidelity_limits() {
+    // A run with both a failure and fidelity limits reports the failure
+    // (Partial), the more severe fact — never Degraded.
+    let mut o = base();
+    o.interfaces = SectionResult::Observed(vec![]);
+    o.routes_v4 = SectionResult::Failed("nope".into());
+    o.fidelity_limited = true;
+    assert_eq!(o.state(), ProviderState::Partial);
+}

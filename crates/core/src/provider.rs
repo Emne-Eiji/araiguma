@@ -127,33 +127,48 @@ impl ProviderObservation {
     }
 
     /// Overall provider state for this run (see [`ProviderState`]).
+    ///
+    /// Aggregation rules (WO-02 correction §7 — `NotObserved` is never
+    /// conflated with `Unsupported`):
+    ///
+    /// 1. Nothing attempted-and-supported (no section observed and none
+    ///    failed): some sections not attempted → `NotYetObserved` (an
+    ///    unattempted observation is not evidence of missing
+    ///    functionality); otherwise every section is `Unsupported` →
+    ///    `NotSupported`. An empty section list also reports
+    ///    `NotSupported` ("no supported sections in this environment").
+    /// 2. At least one section failed and none observed → `Unavailable`.
+    /// 3. Some sections observed, and at least one supported section
+    ///    failed or was not attempted → `Partial` (the run is incomplete
+    ///    either way; provider health is never claimed from missing
+    ///    observations).
+    /// 4. Every supported section observed, none failed, none unattempted:
+    ///    `Degraded` when the provider recorded fidelity limitations,
+    ///    `Available` otherwise. (Sections that are `Unsupported` in
+    ///    principle never lower the state.)
     pub fn state(&self) -> ProviderState {
-        let mut supported = 0usize;
         let mut observed = 0usize;
         let mut failed = 0usize;
+        let mut not_observed = 0usize;
         for (_kind, outcome) in self.sections() {
             match outcome {
-                SectionOutcome::Observed { .. } => {
-                    supported += 1;
-                    observed += 1;
-                }
-                SectionOutcome::Failed { .. } => {
-                    supported += 1;
-                    failed += 1;
-                }
-                SectionOutcome::Unsupported | SectionOutcome::NotObserved => {}
+                SectionOutcome::Observed { .. } => observed += 1,
+                SectionOutcome::Failed { .. } => failed += 1,
+                SectionOutcome::NotObserved => not_observed += 1,
+                SectionOutcome::Unsupported => {}
             }
         }
-        if supported == 0 {
-            return ProviderState::NotSupported;
-        }
-        if observed == 0 && failed > 0 {
-            return ProviderState::Unavailable;
-        }
-        if failed > 0 {
-            return ProviderState::Partial;
-        }
-        if self.fidelity_limited {
+        if observed == 0 && failed == 0 {
+            if not_observed > 0 {
+                ProviderState::NotYetObserved
+            } else {
+                ProviderState::NotSupported
+            }
+        } else if observed == 0 {
+            ProviderState::Unavailable
+        } else if failed > 0 || not_observed > 0 {
+            ProviderState::Partial
+        } else if self.fidelity_limited {
             ProviderState::Degraded
         } else {
             ProviderState::Available

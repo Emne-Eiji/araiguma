@@ -100,8 +100,9 @@
   <p class="footnote">
     A provider failure never removes other providers' observations: the
     merged snapshot keeps every surviving observation and every failure
-    report. States: available · degraded (limited fidelity) · partial
-    failure · unavailable · not supported here · not yet observed.
+    report. States: available · degraded (limited fidelity) · partial /
+    incomplete run (a section failed or was never attempted) · unavailable ·
+    not supported here · not yet observed.
   </p>
 </div>
 

@@ -103,7 +103,10 @@ export function providerStateLabel(state: ProviderState): { label: string; tone:
     case 'degraded':
       return { label: 'degraded (limited fidelity)', tone: 'unknown' };
     case 'partial':
-      return { label: 'partial failure', tone: 'down' };
+      // Covers section failures AND supported sections that were never
+      // attempted — both leave the run incomplete; health is never claimed
+      // from missing observations.
+      return { label: 'partial / incomplete run', tone: 'down' };
     case 'unavailable':
       return { label: 'unavailable', tone: 'down' };
     case 'notSupported':

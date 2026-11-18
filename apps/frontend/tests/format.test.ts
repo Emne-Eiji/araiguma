@@ -97,6 +97,14 @@ describe('providerStateLabel', () => {
     expect(providerStateLabel('notSupported').tone).toBe('unavailable');
     expect(providerStateLabel('notYetObserved').tone).toBe('unknown');
   });
+
+  it('words the partial state as an incomplete run, never as health', () => {
+    // The corrected aggregation: Partial covers failed sections AND
+    // supported sections that were never attempted.
+    expect(providerStateLabel('partial').label).toBe('partial / incomplete run');
+    expect(providerStateLabel('notYetObserved').label).toBe('not yet observed');
+    expect(providerStateLabel('notSupported').label).toBe('not supported here');
+  });
 });
 
 describe('summarizeAddresses', () => {
