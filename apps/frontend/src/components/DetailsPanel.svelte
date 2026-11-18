@@ -33,6 +33,11 @@
       ? snapshot.interfaces.find((i) => i.ifindex === iface.parentIfindex)
       : undefined,
   );
+  const peer = $derived(
+    iface.peerIfindex !== null
+      ? snapshot.interfaces.find((i) => i.ifindex === iface.peerIfindex)
+      : undefined,
+  );
   const routesUsing = $derived(
     snapshot.routes.filter((r) => r.outputInterface === iface.ifindex),
   );
@@ -81,6 +86,13 @@
       <dd class="mono">{master ? master.name : iface.masterIfindex !== null ? iface.masterIfindex : '—'}</dd>
       <dt>Parent link</dt>
       <dd class="mono">{parent ? parent.name : iface.parentIfindex !== null ? iface.parentIfindex : '—'}</dd>
+      <dt>veth peer</dt>
+      <dd class="mono" title={iface.peerIfindex !== null && !peer
+        ? 'the named peer is not part of this observation (it may live in another network namespace)'
+        : undefined}
+      >
+        {peer ? peer.name : iface.peerIfindex !== null ? `#${iface.peerIfindex} (not in this observation)` : '—'}
+      </dd>
       <dt>Observed by</dt>
       <dd>{iface.sources.join(', ')}</dd>
     </dl>

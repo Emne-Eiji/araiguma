@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "sourceTimestampMs": 1765824003000,
   "nodes": [
     {
@@ -38,6 +38,7 @@
         "adminState": "up",
         "masterIfindex": null,
         "parentIfindex": null,
+        "peerIfindex": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [
@@ -98,6 +99,7 @@
         "adminState": "up",
         "masterIfindex": null,
         "parentIfindex": null,
+        "peerIfindex": null,
         "routesUsing": 2,
         "defaultRoutes": 1,
         "sources": [
@@ -141,6 +143,7 @@
         "adminState": "up",
         "masterIfindex": null,
         "parentIfindex": 2,
+        "peerIfindex": null,
         "routesUsing": 1,
         "defaultRoutes": 0,
         "sources": [
@@ -183,6 +186,7 @@
         "adminState": "up",
         "masterIfindex": null,
         "parentIfindex": null,
+        "peerIfindex": null,
         "routesUsing": 1,
         "defaultRoutes": 0,
         "sources": [
@@ -226,6 +230,7 @@
         "adminState": "up",
         "masterIfindex": 4,
         "parentIfindex": null,
+        "peerIfindex": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [
@@ -269,6 +274,7 @@
         "adminState": "up",
         "masterIfindex": null,
         "parentIfindex": null,
+        "peerIfindex": 7,
         "routesUsing": 1,
         "defaultRoutes": 0,
         "sources": [
@@ -311,6 +317,7 @@
         "adminState": "up",
         "masterIfindex": null,
         "parentIfindex": null,
+        "peerIfindex": 6,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [
@@ -340,6 +347,7 @@
         "adminState": "up",
         "masterIfindex": null,
         "parentIfindex": null,
+        "peerIfindex": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [
@@ -373,6 +381,7 @@
         "adminState": null,
         "masterIfindex": null,
         "parentIfindex": null,
+        "peerIfindex": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [],
@@ -418,6 +427,25 @@
         }
       },
       "detail": "interface is a port of its master (IFLA_MASTER); master observed as a bridge"
+    },
+    {
+      "from": {
+        "interface": {
+          "ifindex": 6
+        }
+      },
+      "to": {
+        "interface": {
+          "ifindex": 7
+        }
+      },
+      "edgeKind": "vethPeer",
+      "evidence": {
+        "observed": {
+          "source": "netlink"
+        }
+      },
+      "detail": "veth peer (kernel-named ifindex)"
     },
     {
       "from": {

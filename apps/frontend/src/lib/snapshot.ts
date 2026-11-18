@@ -151,6 +151,7 @@ function validateInterface(raw: unknown, path: string): void {
   optional((v, p) => asInt(v, p, { min: 0 }), iface.txQueueLen, `${path}.txQueueLen`);
   optional((v, p) => asInt(v, p, { min: 1 }), iface.masterIfindex, `${path}.masterIfindex`);
   optional((v, p) => asInt(v, p, { min: 1 }), iface.parentIfindex, `${path}.parentIfindex`);
+  optional((v, p) => asInt(v, p, { min: 1 }), iface.peerIfindex, `${path}.peerIfindex`);
   asSources(iface.sources, `${path}.sources`);
   asStringArray(iface.notes, `${path}.notes`);
 }
@@ -235,10 +236,10 @@ export function parseSnapshot(input: unknown): NetworkSnapshot {
 function parseSnapshotInner(input: unknown): NetworkSnapshot {
   const root = asRecord(input, '$');
   const schema = root.schemaVersion;
-  if (schema !== 1 && schema !== 2) {
+  if (schema !== 1 && schema !== 2 && schema !== 3) {
     fail(
       '$.schemaVersion',
-      `unsupported schema version ${String(schema)} (expected 1 or 2; this build writes v2)`,
+      `unsupported schema version ${String(schema)} (expected 1, 2, or 3; this build writes v3)`,
     );
   }
   asInt(root.timestampMs, '$.timestampMs', { min: 0 });

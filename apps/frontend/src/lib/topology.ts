@@ -50,6 +50,7 @@ const EDGE_KINDS = [
   'bondMember',
   'masterMember',
   'linkParent',
+  'vethPeer',
   'gatewayRoute',
   'gatewayInferred',
 ] as const;
@@ -126,6 +127,7 @@ function validateNode(raw: unknown, path: string): ValidatedNode {
       `expected a hardware address or the sentinels 'absent'/'notObserved', got ${JSON.stringify(detail.macAddress)}`,
     );
   }
+  optional((v, p) => asInt(v, p, { min: 1 }), detail.peerIfindex, `${path}.detail.peerIfindex`);
   optional((v, p) => asInt(v, p, { min: 0 }), detail.mtu, `${path}.detail.mtu`);
   optional(asStringArray, detail.notes, `${path}.detail.notes`);
   asArray(detail.sources, `${path}.detail.sources`);
@@ -144,7 +146,7 @@ function validateNode(raw: unknown, path: string): ValidatedNode {
 function parseTopologyInner(input: unknown): TopologyDocument {
   const doc = asRecord(input, '$');
   const schema = doc.schemaVersion;
-  if (schema !== 1 && schema !== 2) {
+  if (schema !== 1 && schema !== 2 && schema !== 3) {
     fail(
       '$.schemaVersion',
       `unsupported schemaVersion ${String(schema)} (expected 1 or 2; this build writes v2)`,
@@ -293,8 +295,12 @@ export function edgeKindLabel(kind: TopologyEdgeKind): string {
       return 'bond member';
     case 'masterMember':
       // The kernel named the master, but its type was not established —
-      // never assumed to be a bridge.
+      // never assumed to a bridge.
       return 'port of master (type not established)';
+    case 'vethPeer':
+      // The kernel itself classified the endpoint as veth and named the
+      // peer's ifindex.
+      return 'veth peer';
     case 'linkParent':
       return 'parent link';
     case 'gatewayRoute':

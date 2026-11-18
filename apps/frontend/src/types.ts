@@ -96,6 +96,10 @@ export interface Interface {
   txQueueLen: number | null;
   masterIfindex: number | null;
   parentIfindex: number | null;
+  // veth peer ifindex (WO-03 M2): null = not observed; only set for
+  // interfaces the kernel itself classified as veth. The peer may live in
+  // another network namespace.
+  peerIfindex: number | null;
   sources: ObservationSource[];
   notes: string[];
 }
@@ -186,6 +190,7 @@ export type TopologyEdgeKind =
   | 'bondMember'
   | 'masterMember'
   | 'linkParent'
+  | 'vethPeer'
   | 'gatewayRoute'
   | 'gatewayInferred';
 
@@ -202,6 +207,7 @@ export interface NodeDetail {
   adminState: AdminState | null;
   masterIfindex: number | null;
   parentIfindex: number | null;
+  peerIfindex: number | null;
   routesUsing: number;
   defaultRoutes: number;
   sources: ObservationSource[];

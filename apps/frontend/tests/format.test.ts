@@ -27,6 +27,7 @@ function iface(overrides: Partial<Interface>): Interface {
     txQueueLen: null,
     masterIfindex: null,
     parentIfindex: null,
+    peerIfindex: null,
     sources: ['netlink'],
     notes: [],
     ...overrides,

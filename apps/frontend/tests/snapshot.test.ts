@@ -5,7 +5,7 @@ import { fixtures } from '../src/lib/fixtures';
 describe('snapshot fixtures (the type-sync contract)', () => {
   it('parses the workstation fixture', () => {
     const snapshot = fixtures.workstation.snapshot;
-    expect(snapshot.schemaVersion).toBe(2);
+    expect(snapshot.schemaVersion).toBe(3);
     // The design check depends on this card existing.
     expect(snapshot.interfaces.some((i) => i.name === 'wlp3s0')).toBe(true);
     // Multiple default routes across families are part of the scenario.
@@ -51,7 +51,7 @@ describe('parseSnapshot rejects invalid input loudly', () => {
   });
 
   it('rejects unknown schema versions', () => {
-    expect(() => parseSnapshot({ schemaVersion: 3 })).toThrow(/schema version/);
+    expect(() => parseSnapshot({ schemaVersion: 4 })).toThrow(/schema version/);
     expect(() => parseSnapshot({ schemaVersion: '1' })).toThrow();
   });
 

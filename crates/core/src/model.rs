@@ -497,8 +497,15 @@ pub struct Interface {
     /// Bridge/bond master ifindex (netlink `IFLA_MASTER`, sysfs `master`).
     pub master_ifindex: Option<u32>,
     /// Parent/underlying ifindex (netlink `IFLA_LINK`: vlan parent, tunnel
-    /// underlying device).
+    /// underlying device). For veth devices the kernel reports the PEER
+    /// here — the translator moves it to `peer_ifindex` for interfaces the
+    /// kernel classified as veth, so this field never carries a peer.
     pub parent_ifindex: Option<u32>,
+    /// veth peer ifindex (WO-03 M2). `None` = not observed. Only set for
+    /// interfaces the kernel itself classified as veth; see
+    /// [`crate::topology::EdgeKind::VethPeer`] for the evidence-based
+    /// semantics. The peer may live in another network namespace.
+    pub peer_ifindex: Option<u32>,
     /// Providers that observed this interface, primary first.
     pub sources: Vec<ObservationSource>,
     /// Caveats recorded by providers (kept verbatim).

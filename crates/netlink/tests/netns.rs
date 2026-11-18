@@ -345,3 +345,75 @@ async fn netns_merge_with_sysfs_fallback() {
     );
     assert_eq!(defaults[0].gateway.unwrap().to_string(), "198.51.100.1");
 }
+
+#[tokio::test]
+async fn netns_veth_pair_observed_with_peer_relationship() {
+    // WO-03 M2: a real veth pair inside the transient namespace. The
+    // kernel classifies both endpoints as veth and reports each peer's
+    // ifindex (via IFLA_LINK on this kernel); the merged snapshot carries
+    // the peers, and the topology projects exactly one VethPeer edge.
+    if !ensure_netns("netns_veth_pair_observed_with_peer_relationship") {
+        return; // parent: the child already ran and was asserted
+    }
+
+    ip(&[
+        "link", "add", "ar-veth0", "type", "veth", "peer", "name", "ar-veth1",
+    ]);
+
+    let mut netlink = NetlinkProvider::new();
+    let observation = netlink.observe().await;
+    let interfaces: Vec<_> = observation.interfaces.items().to_vec();
+
+    let veth0 = interfaces
+        .iter()
+        .find(|i| i.name == "ar-veth0")
+        .expect("veth0 observed")
+        .clone();
+    let veth1 = interfaces
+        .iter()
+        .find(|i| i.name == "ar-veth1")
+        .expect("veth1 observed")
+        .clone();
+    assert_eq!(veth0.kind, InterfaceKind::Veth);
+    assert_eq!(veth1.kind, InterfaceKind::Veth);
+    assert_eq!(veth0.peer_ifindex, Some(veth1.ifindex));
+    assert_eq!(veth1.peer_ifindex, Some(veth0.ifindex));
+    // A veth's link is its peer — never a parent/underlay relationship.
+    assert_eq!(veth0.parent_ifindex, None);
+    assert_eq!(veth1.parent_ifindex, None);
+
+    // The topology projection: exactly one deduplicated VethPeer edge.
+    let mut sysfs = araiguma_sysfs::SysFsProvider::new();
+    let snapshot = araiguma_core::merge::merge(vec![observation, sysfs.observe().await], 42);
+    let doc = araiguma_core::build_topology(&snapshot);
+    let peer_edges: Vec<_> = doc
+        .edges
+        .iter()
+        .filter(|e| e.edge_kind == araiguma_core::topology::EdgeKind::VethPeer)
+        .collect();
+    assert_eq!(
+        peer_edges.len(),
+        1,
+        "one deduplicated veth peer edge: {peer_edges:?}"
+    );
+    let (from, to) = (peer_edges[0].from, peer_edges[0].to);
+    let idx = |id| match id {
+        araiguma_core::topology::NodeId::Interface { ifindex } => ifindex,
+        _ => unreachable!("veth peers are interface nodes"),
+    };
+    assert!(
+        (idx(from), idx(to)) == (veth0.ifindex, veth1.ifindex)
+            || (idx(from), idx(to)) == (veth1.ifindex, veth0.ifindex)
+    );
+
+    // Cross-validation: iproute2 agrees these are peers.
+    let output = Command::new("ip")
+        .args(["-d", "link", "show", "ar-veth0"])
+        .output()
+        .expect("ip -d link");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        text.contains("veth"),
+        "iproute2 reports the veth kind: {text}"
+    );
+}

@@ -182,6 +182,11 @@ pub fn project_snapshot_to_topology(input: Option<&str>) -> Result<TopologyDocum
         })?;
     match version {
         v if v == u64::from(araiguma_core::snapshot::SNAPSHOT_SCHEMA_VERSION) => {}
+        2 => {
+            // v2 documents (three-state MAC, pre-veth/multipath) parse
+            // under the v3 model: every v3 addition is optional or
+            // backward-compatible. The MAC rule already rejects ambiguity.
+        }
         1 => {
             // v1 is acceptable only where its macAddress fields are
             // unambiguous (non-null). A null fails with a clear reason.

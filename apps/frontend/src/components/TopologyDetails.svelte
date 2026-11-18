@@ -80,6 +80,13 @@
         </dd>
         <dt>MTU</dt>
         <dd class="mono">{node.detail.mtu ?? '—'}</dd>
+        <dt>veth peer</dt>
+        <dd class="mono" title={node.detail.peerIfindex !== null
+          ? 'the kernel named this veth peer; see the veth peer relation below'
+          : undefined}
+        >
+          {node.detail.peerIfindex ?? '—'}
+        </dd>
         <dt>Routes via</dt>
         <dd class="mono">{node.detail.routesUsing} ({node.detail.defaultRoutes} default)</dd>
         <dt>Observed by</dt>

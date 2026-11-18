@@ -13,7 +13,9 @@
 //!   from the kernel's own master statements — the relationship exists
 //!   because IFLA_MASTER names the master, and its flavor (bridge port,
 //!   bond member, or neutral) comes from the master's own kind
-//!   observation, never from an assumption; `linkParent` from IFLA_LINK;
+//!   observation, never from an assumption; `linkParent` from IFLA_LINK
+//!   (never for veth — their IFLA_LINK is the peer); `vethPeer` when the
+//!   kernel classified an endpoint as veth and named the peer's ifindex;
 //!   `gatewayRoute` from a main-table route naming both oif and gateway;
 //!   and `gatewayInferred` only when a gateway without an oif falls
 //!   inside exactly one interface's subnet (the derivation is recorded).
@@ -33,13 +35,15 @@ use crate::snapshot::NetworkSnapshot;
 
 /// Current topology document schema revision.
 ///
+/// * **v3** (WO-03): edge kind `vethPeer` (the observed veth peer
+///   relationship) and `peerIfindex` in node details.
 /// * **v2** (WO-02 correction): `macAddress` in node details became the
 ///   three-state [`MacObservation`] string representation (address /
 ///   `"absent"` / `"notObserved"`); edge kinds gained `bondMember` and
 ///   `masterMember` (a master relationship's flavor comes from the
 ///   master's own kind observation, never an assumption).
 /// * v1: everything else, as originally defined.
-pub const TOPOLOGY_SCHEMA_VERSION: u32 = 2;
+pub const TOPOLOGY_SCHEMA_VERSION: u32 = 3;
 
 /// Identifies a topology node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -68,6 +72,17 @@ pub enum NodeState {
 }
 
 /// The kind of relationship an edge represents.
+///
+/// veth peer semantics (WO-03 M2, verified live on kernel 5.10): a veth
+/// device's `IFLA_LINK` is its **peer's** ifindex — the kernel's veth
+/// implementation reports the peer as the link, and dumps do not carry
+/// `IFLA_INFO_DATA` on this kernel (the netlink crate models
+/// `IFLA_VETH_PEER_IFINDEX` only on the creation path, where the peer
+/// arrives as a full link message). The translator records the peer from
+/// either source, and only for interfaces the kernel itself classified as
+/// `veth` — for other kinds `IFLA_LINK` means something else (vlan parent,
+/// tunnel underlay) and stays in `parent_ifindex`, which is why
+/// [`EdgeKind::LinkParent`] is never drawn for veth interfaces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EdgeKind {
@@ -86,8 +101,15 @@ pub enum EdgeKind {
     /// neutrally.
     MasterMember,
     /// Interface's parent link (IFLA_LINK): vlan parent, tunnel underlay,
-    /// or another link-layer parent.
+    /// or another link-layer parent. Never drawn for veth interfaces —
+    /// their IFLA_LINK is the peer, represented by [`EdgeKind::VethPeer`].
     LinkParent,
+    /// veth peer relationship: the kernel itself classified the endpoint as
+    /// veth and named the peer's ifindex (IFLA_LINK on a veth, or the
+    /// creation-path IFLA_VETH_PEER_IFINDEX). The peer may live in another
+    /// network namespace — its ifindex is only meaningful when the peer is
+    /// part of the same observation.
+    VethPeer,
     /// A main-table route names both the output interface and the gateway.
     GatewayRoute,
     /// A route names the gateway but no output interface, and the gateway
@@ -120,6 +142,8 @@ pub struct NodeDetail {
     pub admin_state: Option<AdminState>,
     pub master_ifindex: Option<u32>,
     pub parent_ifindex: Option<u32>,
+    /// veth peer ifindex, when the kernel named one (interface nodes only).
+    pub peer_ifindex: Option<u32>,
     /// Routes whose output interface is this node (interface nodes only).
     pub routes_using: usize,
     /// Default routes among them.
@@ -237,8 +261,75 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
                 );
             }
         }
+        // veth peer relationships (WO-03 M2): only for interfaces the kernel
+        // itself classified as veth, and only when the peer is part of this
+        // observation. A peer outside the snapshot (possibly in another
+        // network namespace) is an annotation, never an invented edge.
+        if iface.kind == InterfaceKind::Veth {
+            if let Some(peer) = iface.peer_ifindex {
+                if peer == iface.ifindex {
+                    annotate_interface(
+                        &mut nodes,
+                        iface.ifindex,
+                        "names itself as veth peer (ifindex {peer}) — an invalid reference; no relationship drawn".to_string(),
+                    );
+                } else if snapshot.interface_by_ifindex(peer).is_some() {
+                    // Deduplicate: when both endpoints name each other, one
+                    // edge represents the pair (from the lower ifindex).
+                    let already_drawn = edges.iter().any(|e| {
+                        e.edge_kind == EdgeKind::VethPeer
+                            && ((e.from == NodeId::Interface { ifindex: peer }
+                                && e.to
+                                    == NodeId::Interface {
+                                        ifindex: iface.ifindex,
+                                    })
+                                || (e.from
+                                    == NodeId::Interface {
+                                        ifindex: iface.ifindex,
+                                    }
+                                    && e.to == NodeId::Interface { ifindex: peer }))
+                    });
+                    if !already_drawn {
+                        edges.push(TopologyEdge {
+                            from: NodeId::Interface {
+                                ifindex: iface.ifindex,
+                            },
+                            to: NodeId::Interface { ifindex: peer },
+                            edge_kind: EdgeKind::VethPeer,
+                            evidence: Evidence::Observed {
+                                source: primary_source(&iface.sources),
+                            },
+                            detail: Some("veth peer (kernel-named ifindex)".to_string()),
+                        });
+                    }
+                } else {
+                    annotate_interface(
+                        &mut nodes,
+                        iface.ifindex,
+                        format!(
+                            "veth peer ifindex {peer} is not part of this observation (it may live in another network namespace); no relationship drawn"
+                        ),
+                    );
+                }
+            }
+        }
+
         if let Some(parent) = iface.parent_ifindex {
-            if parent == iface.ifindex {
+            if iface.kind == InterfaceKind::Veth {
+                // Defensive: the translator never sets parent_ifindex on a
+                // veth, but a hand-written or foreign document might — a
+                // veth's IFLA_LINK is its peer, not a parent, and drawing a
+                // parent edge would misrepresent it.
+                if parent != iface.peer_ifindex.unwrap_or(0) {
+                    annotate_interface(
+                        &mut nodes,
+                        iface.ifindex,
+                        format!(
+                            "carries both a veth peer and a parent ifindex ({parent}); the peer relationship is authoritative, no parent edge drawn"
+                        ),
+                    );
+                }
+            } else if parent == iface.ifindex {
                 annotate_interface(
                     &mut nodes,
                     iface.ifindex,
@@ -440,6 +531,7 @@ fn interface_node(snapshot: &NetworkSnapshot, iface: &Interface) -> TopologyNode
             admin_state: iface.admin_state,
             master_ifindex: iface.master_ifindex,
             parent_ifindex: iface.parent_ifindex,
+            peer_ifindex: iface.peer_ifindex,
             routes_using: routes_using.len(),
             default_routes,
             sources: iface.sources.clone(),

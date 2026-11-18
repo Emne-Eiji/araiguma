@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "timestampMs": 1765824002000,
   "interfaces": [
     {
@@ -18,7 +18,8 @@
         "netlink",
         "sysfs"
       ],
-      "notes": []
+      "notes": [],
+      "peerIfindex": null
     },
     {
       "ifindex": 2,
@@ -36,7 +37,8 @@
         "netlink",
         "sysfs"
       ],
-      "notes": []
+      "notes": [],
+      "peerIfindex": null
     },
     {
       "ifindex": 5,
@@ -53,7 +55,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "peerIfindex": null
     }
   ],
   "addresses": [

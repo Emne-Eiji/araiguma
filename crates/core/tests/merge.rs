@@ -24,6 +24,7 @@ fn iface(ifindex: u32, name: &str, kind: InterfaceKind) -> Interface {
         tx_queue_len: None,
         master_ifindex: None,
         parent_ifindex: None,
+        peer_ifindex: None,
         sources: vec![],
         notes: vec![],
     }

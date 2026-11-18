@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "sourceTimestampMs": 1765824001000,
   "nodes": [
     {
@@ -38,6 +38,7 @@
         "adminState": "up",
         "masterIfindex": null,
         "parentIfindex": null,
+        "peerIfindex": null,
         "routesUsing": 1,
         "defaultRoutes": 0,
         "sources": [
@@ -97,6 +98,7 @@
         "adminState": "up",
         "masterIfindex": null,
         "parentIfindex": null,
+        "peerIfindex": null,
         "routesUsing": 2,
         "defaultRoutes": 1,
         "sources": [
@@ -128,6 +130,7 @@
         "adminState": "down",
         "masterIfindex": null,
         "parentIfindex": null,
+        "peerIfindex": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [
@@ -159,6 +162,7 @@
         "adminState": "up",
         "masterIfindex": null,
         "parentIfindex": null,
+        "peerIfindex": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [
@@ -193,6 +197,7 @@
         "adminState": null,
         "masterIfindex": null,
         "parentIfindex": null,
+        "peerIfindex": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [],

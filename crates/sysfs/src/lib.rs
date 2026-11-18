@@ -268,6 +268,7 @@ fn read_one_interface(path: &Path, ifindex: u32, name: &str) -> Interface {
         tx_queue_len,
         master_ifindex: None,
         parent_ifindex: None,
+        peer_ifindex: None,
         sources: vec![ObservationSource::SysFs],
         notes,
     }

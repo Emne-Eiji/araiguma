@@ -237,6 +237,7 @@ const baseNode = {
     adminState: 'up',
     masterIfindex: null,
     parentIfindex: null,
+    peerIfindex: null,
     routesUsing: 1,
     defaultRoutes: 1,
     sources: ['netlink'],

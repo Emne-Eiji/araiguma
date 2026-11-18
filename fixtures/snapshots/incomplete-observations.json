@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "timestampMs": 1765824001000,
   "interfaces": [
     {
@@ -17,7 +17,8 @@
       "sources": [
         "sysfs"
       ],
-      "notes": []
+      "notes": [],
+      "peerIfindex": null
     },
     {
       "ifindex": 2,
@@ -36,7 +37,8 @@
       ],
       "notes": [
         "classification caveat: sysfs cannot distinguish dummy, veth, vlan and similar virtual interfaces from Ethernet (same ARPHRD type)"
-      ]
+      ],
+      "peerIfindex": null
     },
     {
       "ifindex": 3,
@@ -53,7 +55,8 @@
       "sources": [
         "sysfs"
       ],
-      "notes": []
+      "notes": [],
+      "peerIfindex": null
     },
     {
       "ifindex": 10,
@@ -72,7 +75,8 @@
       ],
       "notes": [
         "classification caveat: sysfs cannot classify this interface further (ARPHRD_NONE); netlink would likely classify it as wireguard or tunnel"
-      ]
+      ],
+      "peerIfindex": null
     }
   ],
   "addresses": [

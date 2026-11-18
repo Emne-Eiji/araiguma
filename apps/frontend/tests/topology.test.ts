@@ -23,7 +23,7 @@ describe('topology goldens (type-sync contract)', () => {
 
   it('workstation golden matches the design invariants', () => {
     const doc = defaultTopology();
-    expect(doc.schemaVersion).toBe(2);
+    expect(doc.schemaVersion).toBe(3);
     expect(doc.sourceTimestampMs).toBe(fixtures.workstation.snapshot.timestampMs);
 
     const gateways = doc.nodes.filter((n) => n.nodeKind === 'gateway');
@@ -56,17 +56,19 @@ describe('topology goldens (type-sync contract)', () => {
     const doc = topologyGoldens.find((g) => g.name === 'dummy-virtual')!.document;
     expect(doc.edges.filter((e) => e.edgeKind === 'bridgeMember').length).toBe(1);
     expect(doc.edges.filter((e) => e.edgeKind === 'linkParent').length).toBe(1);
-    // veth nodes exist but no fabricated pairing edge.
+    // The OBSERVED veth peer relationship is exactly one deduplicated
+    // edge between the pair (WO-03 M2).
     const veth0 = doc.nodes.find((n) => n.label === 'veth0')!;
     const veth1 = doc.nodes.find((n) => n.label === 'veth1')!;
     expect(veth0 && veth1).toBeTruthy();
-    expect(
-      doc.edges.some(
-        (e) =>
-          (nodeIdKey(e.from) === nodeIdKey(veth0.id) && nodeIdKey(e.to) === nodeIdKey(veth1.id)) ||
-          (nodeIdKey(e.from) === nodeIdKey(veth1.id) && nodeIdKey(e.to) === nodeIdKey(veth0.id)),
-      ),
-    ).toBe(false);
+    const pairEdges = doc.edges.filter(
+      (e) =>
+        e.edgeKind === 'vethPeer' &&
+        ((nodeIdKey(e.from) === nodeIdKey(veth0.id) && nodeIdKey(e.to) === nodeIdKey(veth1.id)) ||
+          (nodeIdKey(e.from) === nodeIdKey(veth1.id) && nodeIdKey(e.to) === nodeIdKey(veth0.id))),
+    );
+    expect(pairEdges.length).toBe(1);
+    expect(edgeKindLabel('vethPeer')).toBe('veth peer');
   });
 });
 
@@ -91,7 +93,7 @@ describe('parseTopology rejects invalid input', () => {
   it('rejects non-objects and wrong schema versions', () => {
     expect(() => parseTopology(null)).toThrow();
     expect(() => parseTopology([])).toThrow();
-    expect(() => parseTopology({ schemaVersion: 3, nodes: [], edges: [] })).toThrow(/schemaVersion/);
+    expect(() => parseTopology({ schemaVersion: 4, nodes: [], edges: [] })).toThrow(/schemaVersion/);
   });
 
   it('rejects nodes without ids or labels', () => {

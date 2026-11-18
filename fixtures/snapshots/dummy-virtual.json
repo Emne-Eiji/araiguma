@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "timestampMs": 1765824003000,
   "interfaces": [
     {
@@ -18,7 +18,8 @@
         "netlink",
         "sysfs"
       ],
-      "notes": []
+      "notes": [],
+      "peerIfindex": null
     },
     {
       "ifindex": 2,
@@ -36,7 +37,8 @@
         "netlink",
         "sysfs"
       ],
-      "notes": []
+      "notes": [],
+      "peerIfindex": null
     },
     {
       "ifindex": 3,
@@ -53,7 +55,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "peerIfindex": null
     },
     {
       "ifindex": 4,
@@ -71,7 +74,8 @@
         "netlink",
         "sysfs"
       ],
-      "notes": []
+      "notes": [],
+      "peerIfindex": null
     },
     {
       "ifindex": 5,
@@ -89,7 +93,8 @@
         "netlink",
         "sysfs"
       ],
-      "notes": []
+      "notes": [],
+      "peerIfindex": null
     },
     {
       "ifindex": 6,
@@ -106,7 +111,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "peerIfindex": 7
     },
     {
       "ifindex": 7,
@@ -123,7 +129,8 @@
       "sources": [
         "netlink"
       ],
-      "notes": []
+      "notes": [],
+      "peerIfindex": 6
     },
     {
       "ifindex": 8,
@@ -141,7 +148,8 @@
         "netlink",
         "sysfs"
       ],
-      "notes": []
+      "notes": [],
+      "peerIfindex": null
     }
   ],
   "addresses": [

@@ -49,7 +49,7 @@ describe('importDocumentText', () => {
   it('imports a valid snapshot', () => {
     const result = importDocumentText(validSnapshotText);
     expect(result.snapshot).not.toBeNull();
-    expect(result.snapshot!.schemaVersion).toBe(2);
+    expect(result.snapshot!.schemaVersion).toBe(3);
     expect(result.topology).toBeNull();
   });
 

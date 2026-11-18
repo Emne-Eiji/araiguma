@@ -113,10 +113,15 @@ fn kind_detail_string(kind: &InfoKind) -> String {
 /// Notes:
 /// * `Controller` is `IFLA_MASTER` (bridge/bond master) under its modern
 ///   kernel name.
-/// * veth peer ifindexes can appear in dumps as
-///   `LinkInfo::Data(InfoData::Veth(InfoVeth::Peer(..)))` on kernels that
-///   fill veth info; the model does not carry them yet — they are skipped
-///   here and revisited when topology work needs veth pairing.
+/// * veth peers (WO-03 M2): for interfaces the kernel classified as veth,
+///   `IFLA_LINK` is the peer's ifindex (verified live on kernel 5.10 —
+///   veth reports its peer as the link; dumps do not carry
+///   `IFLA_INFO_DATA` on this kernel). The creation path can also deliver
+///   the peer as a full link message inside
+///   `LinkInfo::Data(InfoData::Veth(InfoVeth::Peer(..)))`. Both are
+///   recorded in `peer_ifindex`; for veth devices the link is NOT kept in
+///   `parent_ifindex` (it is not a parent). For every other kind,
+///   `IFLA_LINK` keeps its usual parent/underlay meaning.
 /// * Classification: a recognized `IFLA_INFO_KIND` string wins. An
 ///   **unrecognized** kind string proves the device is a specific kind
 ///   this model does not map: the raw string is preserved in `kind_detail`,
@@ -138,6 +143,7 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
     let mut tx_queue_len: Option<u32> = None;
     let mut master_ifindex: Option<u32> = None;
     let mut parent_ifindex: Option<u32> = None;
+    let mut peer_from_info_data: Option<u32> = None;
     let mut oper_state: Option<OperState> = None;
     let mut kind: Option<InterfaceKind> = None;
     let mut kind_detail: Option<String> = None;
@@ -154,12 +160,22 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
             LinkAttribute::OperState(state) => oper_state = Some(map_oper_state(*state)),
             LinkAttribute::LinkInfo(infos) => {
                 for info in infos {
-                    if let netlink_packet_route::link::LinkInfo::Kind(info_kind) = info {
-                        match map_info_kind(info_kind) {
-                            Some(mapped) => kind = Some(mapped),
-                            None => kind_string_unmapped = true,
+                    match info {
+                        netlink_packet_route::link::LinkInfo::Kind(info_kind) => {
+                            match map_info_kind(info_kind) {
+                                Some(mapped) => kind = Some(mapped),
+                                None => kind_string_unmapped = true,
+                            }
+                            kind_detail = Some(kind_detail_string(info_kind));
                         }
-                        kind_detail = Some(kind_detail_string(info_kind));
+                        // Creation-path veth peer: a full link message whose
+                        // header index is the peer's ifindex.
+                        netlink_packet_route::link::LinkInfo::Data(
+                            netlink_packet_route::link::InfoData::Veth(
+                                netlink_packet_route::link::InfoVeth::Peer(peer),
+                            ),
+                        ) => peer_from_info_data = Some(peer.header.index),
+                        _ => {}
                     }
                 }
             }
@@ -172,6 +188,19 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
         None if kind_string_unmapped => InterfaceKind::Other,
         None => InterfaceKind::from_arphrd(message.header.link_layer_type as u16),
     };
+
+    // veth peer semantics: the kernel classified this interface as veth and
+    // named a link — that link is the PEER, not a parent. The peer is
+    // recorded (InfoData wins when both sources appear; they name the same
+    // device), and the link value is removed from parent_ifindex so no
+    // parent/underlay relationship is fabricated for a veth.
+    let mut peer_ifindex = None;
+    if kind == InterfaceKind::Veth {
+        peer_ifindex = peer_from_info_data.or(parent_ifindex);
+        if peer_ifindex.is_some() {
+            parent_ifindex = None;
+        }
+    }
     let admin_state = Some(if message.header.flags.contains(LinkFlags::Up) {
         AdminState::Up
     } else {
@@ -210,6 +239,7 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
         tx_queue_len,
         master_ifindex,
         parent_ifindex,
+        peer_ifindex,
         sources: vec![ObservationSource::Netlink],
         notes,
     })
@@ -439,7 +469,7 @@ pub fn translate_route(message: &RouteMessage) -> Option<Route> {
 mod tests {
     use super::*;
     use netlink_packet_route::address::AddressHeader;
-    use netlink_packet_route::link::{LinkHeader, LinkInfo, LinkLayerType};
+    use netlink_packet_route::link::{InfoData, InfoVeth, LinkHeader, LinkInfo, LinkLayerType};
     use netlink_packet_route::route::{
         RouteHeader, RouteScope as NlRouteScope, RouteType as NlRouteType,
     };
@@ -595,6 +625,61 @@ mod tests {
             index,
         };
         message
+    }
+
+    #[test]
+    fn veth_link_attribute_is_the_peer_not_a_parent() {
+        // WO-03 M2 (verified live, kernel 5.10): a veth's IFLA_LINK is its
+        // peer's ifindex. The translator records it as the peer and does
+        // NOT keep it as a parent.
+        let mut peer_message = link_message();
+        peer_message.header.index = 7;
+        let mut message = link_message();
+        message.header.index = 6;
+        message.attributes = vec![
+            LinkAttribute::IfName("veth0".into()),
+            LinkAttribute::Link(7),
+            LinkAttribute::LinkInfo(vec![
+                LinkInfo::Kind(InfoKind::Veth),
+                LinkInfo::Data(InfoData::Veth(InfoVeth::Peer(peer_message))),
+            ]),
+        ];
+        let interface = translate_link(&message).expect("valid link");
+        assert_eq!(interface.kind, InterfaceKind::Veth);
+        assert_eq!(interface.peer_ifindex, Some(7));
+        assert_eq!(
+            interface.parent_ifindex, None,
+            "a veth's link is its peer, not a parent"
+        );
+
+        // Without InfoData (the dump shape on this kernel), IFLA_LINK
+        // alone still names the peer.
+        let mut dump_only = link_message();
+        dump_only.header.index = 6;
+        dump_only.attributes = vec![
+            LinkAttribute::IfName("veth0".into()),
+            LinkAttribute::Link(7),
+            LinkAttribute::LinkInfo(vec![LinkInfo::Kind(InfoKind::Veth)]),
+        ];
+        let interface = translate_link(&dump_only).expect("valid link");
+        assert_eq!(interface.peer_ifindex, Some(7));
+        assert_eq!(interface.parent_ifindex, None);
+    }
+
+    #[test]
+    fn non_veth_link_attribute_stays_a_parent() {
+        // A vlan's IFLA_LINK is its parent — no peer is invented.
+        let mut message = link_message();
+        message.header.index = 3;
+        message.attributes = vec![
+            LinkAttribute::IfName("eth0.100".into()),
+            LinkAttribute::Link(2),
+            LinkAttribute::LinkInfo(vec![LinkInfo::Kind(InfoKind::Vlan)]),
+        ];
+        let interface = translate_link(&message).expect("valid link");
+        assert_eq!(interface.kind, InterfaceKind::Vlan);
+        assert_eq!(interface.parent_ifindex, Some(2));
+        assert_eq!(interface.peer_ifindex, None);
     }
 
     #[test]

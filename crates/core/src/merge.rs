@@ -194,6 +194,7 @@ fn merge_interface(into: &mut Vec<Interface>, new: Interface) {
         merge_field(&mut existing.tx_queue_len, new.tx_queue_len);
         merge_field(&mut existing.master_ifindex, new.master_ifindex);
         merge_field(&mut existing.parent_ifindex, new.parent_ifindex);
+        merge_field(&mut existing.peer_ifindex, new.peer_ifindex);
         for note in new.notes {
             if !existing.notes.contains(&note) {
                 existing.notes.push(note);

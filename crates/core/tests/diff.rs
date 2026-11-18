@@ -29,6 +29,7 @@ fn iface(ifindex: u32, name: &str, oper: OperState) -> Interface {
         tx_queue_len: None,
         master_ifindex: None,
         parent_ifindex: None,
+        peer_ifindex: None,
         sources: vec![ObservationSource::Netlink],
         notes: vec![],
     }

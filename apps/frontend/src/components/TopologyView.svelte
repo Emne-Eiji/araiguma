@@ -113,7 +113,7 @@
     },
     {
       selector:
-        'edge[kind = "bridgeMember"], edge[kind = "bondMember"], edge[kind = "masterMember"], edge[kind = "linkParent"]',
+        'edge[kind = "bridgeMember"], edge[kind = "bondMember"], edge[kind = "masterMember"], edge[kind = "linkParent"], edge[kind = "vethPeer"]',
       style: { 'line-color': '#41507a', 'target-arrow-color': '#41507a' },
     },
     {

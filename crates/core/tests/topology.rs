@@ -194,14 +194,26 @@ fn dummy_virtual_topology_structural_edges() {
         .unwrap()
         .contains("vlan parent"));
 
-    // veth kinds are preserved as nodes; veth PAIRING is not observable in
-    // the current model, so there must be no edge between veth0 and veth1.
+    // veth kinds are preserved as nodes, and the OBSERVED peer
+    // relationship (the kernel names the peer's ifindex on a veth) becomes
+    // exactly one deduplicated VethPeer edge between veth0 and veth1.
     assert!(doc.nodes.iter().any(|n| n.label == "veth0"));
     assert!(doc.nodes.iter().any(|n| n.label == "veth1"));
-    assert!(!doc.edges.iter().any(|e| {
-        (e.from == interface(6) && e.to == interface(7))
-            || (e.from == interface(7) && e.to == interface(6))
-    }));
+    let veth_edges: Vec<_> = doc
+        .edges
+        .iter()
+        .filter(|e| {
+            e.edge_kind == EdgeKind::VethPeer
+                && ((e.from == interface(6) && e.to == interface(7))
+                    || (e.from == interface(7) && e.to == interface(6)))
+        })
+        .collect();
+    assert_eq!(
+        veth_edges.len(),
+        1,
+        "one deduplicated veth peer edge, not one per direction: {:?}",
+        veth_edges
+    );
 
     // Unrecognized/virtual kinds are all preserved.
     let kinds: Vec<String> = doc
@@ -478,6 +490,7 @@ fn interface_fixture(ifindex: u32, name: &str, kind: &str) -> Interface {
         tx_queue_len: None,
         master_ifindex: None,
         parent_ifindex: None,
+        peer_ifindex: None,
         sources: vec![ObservationSource::Netlink],
         notes: vec![],
     }
@@ -512,4 +525,88 @@ fn route_fixture(oif: Option<u32>, dest: &str, prefix: u8, gateway: Option<&str>
         sources: vec![ObservationSource::Netlink],
         notes: vec![],
     }
+}
+
+// ── veth peer relationships (WO-03 M2) ─────────────────────────────────────
+
+#[test]
+fn veth_peer_outside_the_observation_is_annotated_never_invented() {
+    // The kernel named a peer that is not part of this snapshot — it may
+    // live in another network namespace. The member node keeps an honest
+    // annotation; no edge is fabricated.
+    let mut snapshot = fixture("empty");
+    let mut veth = interface_fixture(6, "veth0", "other");
+    veth.kind = InterfaceKind::Veth;
+    veth.peer_ifindex = Some(99);
+    snapshot.interfaces = vec![veth];
+
+    let doc = build_topology(&snapshot);
+    assert!(!doc.edges.iter().any(|e| e.edge_kind == EdgeKind::VethPeer));
+    let veth0 = doc.nodes.iter().find(|n| n.label == "veth0").unwrap();
+    assert!(veth0
+        .annotations
+        .iter()
+        .any(|a| a.contains("veth peer ifindex 99 is not part of this observation")));
+}
+
+#[test]
+fn veth_peer_self_reference_is_invalid_not_an_edge() {
+    let mut snapshot = fixture("empty");
+    let mut veth = interface_fixture(6, "veth0", "other");
+    veth.kind = InterfaceKind::Veth;
+    veth.peer_ifindex = Some(6);
+    snapshot.interfaces = vec![veth];
+
+    let doc = build_topology(&snapshot);
+    assert!(!doc.edges.iter().any(|e| e.from == e.to));
+    let veth0 = doc.nodes.iter().find(|n| n.label == "veth0").unwrap();
+    assert!(veth0
+        .annotations
+        .iter()
+        .any(|a| a.contains("names itself as veth peer")));
+}
+
+#[test]
+fn asymmetric_veth_peer_declaration_still_draws_one_edge() {
+    // Only veth0 names its peer (veth1 observed nothing about the
+    // relationship): the kernel's claim is enough — one edge, from the
+    // declaring side.
+    let mut snapshot = fixture("empty");
+    let mut a = interface_fixture(6, "veth0", "other");
+    a.kind = InterfaceKind::Veth;
+    a.peer_ifindex = Some(7);
+    let mut b = interface_fixture(7, "veth1", "other");
+    b.kind = InterfaceKind::Veth;
+    snapshot.interfaces = vec![a, b];
+
+    let doc = build_topology(&snapshot);
+    let veth_edges: Vec<_> = doc
+        .edges
+        .iter()
+        .filter(|e| e.edge_kind == EdgeKind::VethPeer)
+        .collect();
+    assert_eq!(veth_edges.len(), 1);
+    assert_eq!(veth_edges[0].from, interface(6));
+    assert_eq!(veth_edges[0].to, interface(7));
+}
+
+#[test]
+fn non_veth_interfaces_never_get_peer_edges() {
+    // A vlan's IFLA_LINK is its parent, not a peer — even if some foreign
+    // document wrongly carried a peerIfindex on a non-veth kind, the
+    // projection must not interpret it as veth pairing.
+    let mut snapshot = fixture("empty");
+    let mut vlan = interface_fixture(3, "eth0.100", "other");
+    vlan.kind = InterfaceKind::Vlan;
+    vlan.parent_ifindex = Some(2);
+    vlan.peer_ifindex = Some(2); // foreign nonsense: not a veth
+    let eth = interface_fixture(2, "eth0", "ethernet");
+    snapshot.interfaces = vec![eth, vlan];
+
+    let doc = build_topology(&snapshot);
+    assert!(!doc.edges.iter().any(|e| e.edge_kind == EdgeKind::VethPeer));
+    // The parent relationship still draws normally.
+    assert!(doc.edges.iter().any(|e| e.edge_kind == EdgeKind::LinkParent
+        && e.from == interface(3)
+        && e.to == interface(2)));
 }

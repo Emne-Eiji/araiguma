@@ -11,13 +11,18 @@ use crate::provider::ProviderReport;
 
 /// Current snapshot schema revision.
 ///
+/// * **v3** (WO-03): interfaces gained `peerIfindex` (the veth peer
+///   relationship; `null` = not observed — see
+///   [`crate::model::Interface::peer_ifindex`]), and routes gain a
+///   complete multipath next-hop representation (`nextHops`) instead of
+///   the previous first-hop-only form (landed with M3 in this version).
 /// * **v2** (WO-02 correction §5): `macAddress` became the three-state
 ///   [`crate::model::MacObservation`] — the plain address string (present,
 ///   identical to v1), or the sentinels `"absent"` (observed to have no
 ///   hardware address) / `"notObserved"`. v1's ambiguous `null` is
 ///   rejected on read.
 /// * v1: everything else, as originally defined.
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 2;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 3;
 
 /// One merged observation of the local network environment.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -147,6 +152,9 @@ pub fn interface_changed_fields(old: &Interface, new: &Interface) -> Vec<String>
     }
     if old.parent_ifindex != new.parent_ifindex {
         changed.push("parentIfindex".into());
+    }
+    if old.peer_ifindex != new.peer_ifindex {
+        changed.push("peerIfindex".into());
     }
     changed
 }
