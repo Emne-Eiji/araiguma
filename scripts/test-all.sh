@@ -24,7 +24,11 @@ step() { # step <label> <function>
 }
 
 durable_size()      { scripts/check-durable-size.sh; }
-fixtures_stable()   { ./scripts/gen-sysfs-fixtures.sh >/dev/null && git diff --exit-code -- fixtures/; }
+fixtures_stable()   {
+  ./scripts/gen-sysfs-fixtures.sh >/dev/null
+  ./scripts/gen-topology-fixtures.sh >/dev/null
+  git diff --exit-code -- fixtures/
+}
 rust_fmt()          { cargo fmt --all -- --check; }
 rust_clippy()       { cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tail -n 20; }
 rust_tests()        { cargo test --workspace 2>&1 | tail -n 40; }

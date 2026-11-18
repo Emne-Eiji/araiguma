@@ -13,10 +13,13 @@
 //! individual providers are visible in the `providers` section of the
 //! snapshot, never hidden.
 
+use std::io::Read as _;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use araiguma_core::provider::DiscoveryProvider;
-use araiguma_core::{diff_snapshots, merge, NetworkEvent, NetworkSnapshot};
+use araiguma_core::{
+    build_topology, diff_snapshots, merge, NetworkEvent, NetworkSnapshot, TopologyDocument,
+};
 use araiguma_netlink::{Monitor, NetlinkProvider, Signal};
 use araiguma_sysfs::SysFsProvider;
 
@@ -29,8 +32,15 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Parsed command line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
-    Snapshot { pretty: bool },
+    Snapshot {
+        pretty: bool,
+    },
     Watch,
+    /// Project a snapshot JSON file (or stdin) into a topology document.
+    Topology {
+        input: Option<String>,
+        pretty: bool,
+    },
     Help,
     Version,
 }
@@ -42,6 +52,10 @@ araiguma — read-only network observability (observe, do not control)
 USAGE:
     araiguma snapshot [--pretty]   Print one merged observation as JSON
     araiguma watch                 Stream observations as NDJSON events
+    araiguma topology [--input FILE] [--pretty]
+                                   Project a snapshot document (file, or
+                                   stdin when omitted) into a topology
+                                   document (nodes, edges, evidence)
     araiguma --help                Show this help
     araiguma --version             Show the version
 
@@ -57,6 +71,9 @@ watch prints:
                                     not observed; the snapshot is
                                     authoritative again)
 
+Topology documents are a pure projection of a snapshot: nodes and edges
+exist only where the observation model provides evidence.
+
 Diagnostics go to stderr; set ARAIGUMA_LOG=debug for provider tracing."
         .to_string()
 }
@@ -67,12 +84,32 @@ pub fn parse_args(args: &[String]) -> Result<Command, String> {
         [single] => match single.as_str() {
             "snapshot" => Ok(Command::Snapshot { pretty: false }),
             "watch" => Ok(Command::Watch),
+            "topology" => Ok(Command::Topology {
+                input: None,
+                pretty: false,
+            }),
             "--help" | "-h" | "help" => Ok(Command::Help),
             "--version" | "-V" => Ok(Command::Version),
             other => Err(format!("unknown command: {other}")),
         },
         [cmd, flag] if cmd == "snapshot" && flag == "--pretty" => {
             Ok(Command::Snapshot { pretty: true })
+        }
+        [cmd, flag] if cmd == "topology" && flag == "--pretty" => Ok(Command::Topology {
+            input: None,
+            pretty: true,
+        }),
+        [cmd, flag, value] if cmd == "topology" && flag == "--input" => Ok(Command::Topology {
+            input: Some(value.clone()),
+            pretty: false,
+        }),
+        [cmd, flag, value, pretty]
+            if cmd == "topology" && flag == "--input" && pretty == "--pretty" =>
+        {
+            Ok(Command::Topology {
+                input: Some(value.clone()),
+                pretty: true,
+            })
         }
         _ => Err(format!("unrecognized arguments: {args:?}")),
     }
@@ -102,6 +139,35 @@ pub fn render_snapshot(snapshot: &NetworkSnapshot, pretty: bool) -> String {
     } else {
         serde_json::to_string(snapshot).expect("snapshot serializes")
     }
+}
+
+/// Serialize a topology document.
+pub fn render_topology(document: &TopologyDocument, pretty: bool) -> String {
+    if pretty {
+        serde_json::to_string_pretty(document).expect("topology serializes")
+    } else {
+        serde_json::to_string(document).expect("topology serializes")
+    }
+}
+
+/// Load a snapshot from a file (or stdin when `input` is None) and project
+/// it. Read-only; never observes the live system.
+pub fn project_snapshot_to_topology(input: Option<&str>) -> Result<TopologyDocument, String> {
+    let raw = match input {
+        Some(path) => {
+            std::fs::read_to_string(path).map_err(|error| format!("cannot read {path}: {error}"))?
+        }
+        None => {
+            let mut buffer = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buffer)
+                .map_err(|error| format!("cannot read stdin: {error}"))?;
+            buffer
+        }
+    };
+    let snapshot: NetworkSnapshot = serde_json::from_str(&raw)
+        .map_err(|error| format!("invalid snapshot document: {error}"))?;
+    Ok(build_topology(&snapshot))
 }
 
 /// The watch event envelopes (newline-delimited JSON, one per line).

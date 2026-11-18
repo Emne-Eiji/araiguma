@@ -1,0 +1,224 @@
+{
+  "schemaVersion": 1,
+  "sourceTimestampMs": 1765824001000,
+  "nodes": [
+    {
+      "id": {
+        "interface": {
+          "ifindex": 1
+        }
+      },
+      "label": "lo",
+      "nodeKind": "interface",
+      "interfaceKind": "loopback",
+      "kindDetail": null,
+      "state": "unknown",
+      "annotations": [],
+      "detail": {
+        "ifindex": 1,
+        "addresses": [
+          {
+            "ifindex": 1,
+            "family": "ipv6",
+            "address": "::1",
+            "prefixLen": 128,
+            "scope": "host",
+            "flags": [
+              "permanent"
+            ],
+            "label": null,
+            "sources": [
+              "procfs"
+            ]
+          }
+        ],
+        "macAddress": "00:00:00:00:00:00",
+        "mtu": 65536,
+        "operState": "unknown",
+        "adminState": "up",
+        "masterIfindex": null,
+        "parentIfindex": null,
+        "routesUsing": 1,
+        "defaultRoutes": 0,
+        "sources": [
+          "sysfs"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": {
+        "interface": {
+          "ifindex": 2
+        }
+      },
+      "label": "eth0",
+      "nodeKind": "interface",
+      "interfaceKind": "ethernet",
+      "kindDetail": null,
+      "state": "active",
+      "annotations": [
+        "anything beyond this gateway (upstream or internet) is not observed",
+        "classification caveat: sysfs cannot distinguish dummy, veth, vlan and similar virtual interfaces from Ethernet (same ARPHRD type)"
+      ],
+      "detail": {
+        "ifindex": 2,
+        "addresses": [
+          {
+            "ifindex": 2,
+            "family": "ipv6",
+            "address": "fe80::5054:ff:fe12:3456",
+            "prefixLen": 64,
+            "scope": "link",
+            "flags": [
+              "permanent"
+            ],
+            "label": null,
+            "sources": [
+              "procfs"
+            ]
+          },
+          {
+            "ifindex": 2,
+            "family": "ipv6",
+            "address": "2001:db8:0:f::42",
+            "prefixLen": 64,
+            "scope": "global",
+            "flags": [],
+            "label": null,
+            "sources": [
+              "procfs"
+            ]
+          }
+        ],
+        "macAddress": "52:54:00:12:34:56",
+        "mtu": 1500,
+        "operState": "up",
+        "adminState": "up",
+        "masterIfindex": null,
+        "parentIfindex": null,
+        "routesUsing": 2,
+        "defaultRoutes": 1,
+        "sources": [
+          "sysfs"
+        ],
+        "notes": [
+          "classification caveat: sysfs cannot distinguish dummy, veth, vlan and similar virtual interfaces from Ethernet (same ARPHRD type)"
+        ]
+      }
+    },
+    {
+      "id": {
+        "interface": {
+          "ifindex": 3
+        }
+      },
+      "label": "wlan0",
+      "nodeKind": "interface",
+      "interfaceKind": "wireless",
+      "kindDetail": null,
+      "state": "inactive",
+      "annotations": [],
+      "detail": {
+        "ifindex": 3,
+        "addresses": [],
+        "macAddress": "a0:88:b4:22:33:44",
+        "mtu": 1500,
+        "operState": "down",
+        "adminState": "down",
+        "masterIfindex": null,
+        "parentIfindex": null,
+        "routesUsing": 0,
+        "defaultRoutes": 0,
+        "sources": [
+          "sysfs"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": {
+        "interface": {
+          "ifindex": 10
+        }
+      },
+      "label": "wg0",
+      "nodeKind": "interface",
+      "interfaceKind": "virtual",
+      "kindDetail": null,
+      "state": "unknown",
+      "annotations": [
+        "classification caveat: sysfs cannot classify this interface further (ARPHRD_NONE); netlink would likely classify it as wireguard or tunnel"
+      ],
+      "detail": {
+        "ifindex": 10,
+        "addresses": [],
+        "macAddress": null,
+        "mtu": 1420,
+        "operState": "unknown",
+        "adminState": "up",
+        "masterIfindex": null,
+        "parentIfindex": null,
+        "routesUsing": 0,
+        "defaultRoutes": 0,
+        "sources": [
+          "sysfs"
+        ],
+        "notes": [
+          "classification caveat: sysfs cannot classify this interface further (ARPHRD_NONE); netlink would likely classify it as wireguard or tunnel"
+        ]
+      }
+    },
+    {
+      "id": {
+        "gateway": {
+          "address": "192.168.0.1"
+        }
+      },
+      "label": "192.168.0.1",
+      "nodeKind": "gateway",
+      "interfaceKind": null,
+      "kindDetail": null,
+      "state": "unknown",
+      "annotations": [
+        "gateway observed via a routing-table entry; reachability is not tested — observation only",
+        "anything beyond this gateway (upstream or internet) is not observed"
+      ],
+      "detail": {
+        "ifindex": null,
+        "addresses": [],
+        "macAddress": null,
+        "mtu": null,
+        "operState": null,
+        "adminState": null,
+        "masterIfindex": null,
+        "parentIfindex": null,
+        "routesUsing": 0,
+        "defaultRoutes": 0,
+        "sources": [],
+        "notes": []
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": {
+        "interface": {
+          "ifindex": 2
+        }
+      },
+      "to": {
+        "gateway": {
+          "address": "192.168.0.1"
+        }
+      },
+      "edgeKind": "gatewayRoute",
+      "evidence": {
+        "observed": {
+          "source": "procfs"
+        }
+      },
+      "detail": "default via this gateway (main table 254)"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "timestampMs": 1765824004000,
+  "interfaces": [],
+  "addresses": [],
+  "routes": [],
+  "providers": [
+    {
+      "provider": "netlink",
+      "state": "available",
+      "sections": [
+        { "section": "interfaces", "outcome": { "kind": "observed", "count": 0 } },
+        { "section": "addressesV4", "outcome": { "kind": "observed", "count": 0 } },
+        { "section": "addressesV6", "outcome": { "kind": "observed", "count": 0 } },
+        { "section": "routesV4", "outcome": { "kind": "observed", "count": 0 } },
+        { "section": "routesV6", "outcome": { "kind": "observed", "count": 0 } }
+      ],
+      "notes": []
+    },
+    {
+      "provider": "sysfs",
+      "state": "degraded",
+      "sections": [
+        { "section": "interfaces", "outcome": { "kind": "observed", "count": 0 } },
+        { "section": "addressesV4", "outcome": { "kind": "unsupported" } },
+        { "section": "addressesV6", "outcome": { "kind": "observed", "count": 0 } },
+        { "section": "routesV4", "outcome": { "kind": "observed", "count": 0 } },
+        { "section": "routesV6", "outcome": { "kind": "unsupported" } }
+      ],
+      "notes": [
+        "sysfs cannot distinguish dummy, veth, vlan and similar virtual interfaces from Ethernet (same ARPHRD type); netlink classification takes priority",
+        "/proc/net/if_inet6 exposes the address scope and IFA_F flag bits only; address labels are not available from procfs",
+        "route fields protocol/scope/type are not available from /proc/net/route"
+      ]
+    }
+  ]
+}

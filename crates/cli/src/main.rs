@@ -61,6 +61,18 @@ async fn async_main() -> u8 {
                 }
             }
         }
+        Ok(Command::Topology { input, pretty }) => {
+            match araiguma_cli::project_snapshot_to_topology(input.as_deref()) {
+                Ok(document) => {
+                    println!("{}", araiguma_cli::render_topology(&document, pretty));
+                    0
+                }
+                Err(message) => {
+                    eprintln!("araiguma: {message}");
+                    1
+                }
+            }
+        }
         Ok(Command::Help) => {
             println!("{}", araiguma_cli::usage());
             0

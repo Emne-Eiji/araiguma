@@ -20,6 +20,7 @@ pub mod merge;
 pub mod model;
 pub mod provider;
 pub mod snapshot;
+pub mod topology;
 
 pub use merge::merge;
 pub use model::{
@@ -32,3 +33,7 @@ pub use provider::{
     SectionOutcome, SectionReport, SectionResult,
 };
 pub use snapshot::{diff_snapshots, interface_changed_fields, NetworkEvent, NetworkSnapshot};
+pub use topology::{
+    build_topology, EdgeKind, Evidence, NodeDetail, NodeId, NodeKind, NodeState, TopologyDocument,
+    TopologyEdge, TopologyNode, TOPOLOGY_SCHEMA_VERSION,
+};

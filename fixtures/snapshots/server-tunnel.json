@@ -1,0 +1,215 @@
+{
+  "schemaVersion": 1,
+  "timestampMs": 1765824002000,
+  "interfaces": [
+    {
+      "ifindex": 1,
+      "name": "lo",
+      "kind": "loopback",
+      "kindDetail": null,
+      "operState": "unknown",
+      "adminState": "up",
+      "macAddress": "00:00:00:00:00:00",
+      "mtu": 65536,
+      "txQueueLen": 1000,
+      "masterIfindex": null,
+      "parentIfindex": null,
+      "sources": ["netlink", "sysfs"],
+      "notes": []
+    },
+    {
+      "ifindex": 2,
+      "name": "ens3",
+      "kind": "ethernet",
+      "kindDetail": null,
+      "operState": "up",
+      "adminState": "up",
+      "macAddress": "52:54:00:ab:cd:ef",
+      "mtu": 1500,
+      "txQueueLen": 1000,
+      "masterIfindex": null,
+      "parentIfindex": null,
+      "sources": ["netlink", "sysfs"],
+      "notes": []
+    },
+    {
+      "ifindex": 5,
+      "name": "tun0",
+      "kind": "tunnel",
+      "kindDetail": "tun",
+      "operState": "unknown",
+      "adminState": "up",
+      "macAddress": null,
+      "mtu": 1400,
+      "txQueueLen": 100,
+      "masterIfindex": null,
+      "parentIfindex": null,
+      "sources": ["netlink"],
+      "notes": []
+    }
+  ],
+  "addresses": [
+    {
+      "ifindex": 1,
+      "family": "ipv4",
+      "address": "127.0.0.1",
+      "prefixLen": 8,
+      "scope": "host",
+      "flags": ["permanent"],
+      "label": null,
+      "sources": ["netlink"]
+    },
+    {
+      "ifindex": 2,
+      "family": "ipv4",
+      "address": "203.0.113.24",
+      "prefixLen": 24,
+      "scope": "global",
+      "flags": null,
+      "label": null,
+      "sources": ["netlink"]
+    },
+    {
+      "ifindex": 2,
+      "family": "ipv6",
+      "address": "fe80::5054:ff:feab:cdef",
+      "prefixLen": 64,
+      "scope": "link",
+      "flags": ["permanent"],
+      "label": null,
+      "sources": ["netlink", "procfs"]
+    },
+    {
+      "ifindex": 5,
+      "family": "ipv4",
+      "address": "10.8.0.6",
+      "prefixLen": 31,
+      "scope": "global",
+      "flags": null,
+      "label": null,
+      "sources": ["netlink"]
+    }
+  ],
+  "routes": [
+    {
+      "family": "ipv4",
+      "destination": { "address": "0.0.0.0", "prefixLen": 0 },
+      "gateway": null,
+      "outputInterface": 5,
+      "outputInterfaceName": "tun0",
+      "protocol": "dhcp",
+      "scope": "universe",
+      "routeType": "unicast",
+      "metric": 50,
+      "table": 254,
+      "flags": [],
+      "sources": ["netlink"],
+      "notes": []
+    },
+    {
+      "family": "ipv4",
+      "destination": { "address": "0.0.0.0", "prefixLen": 0 },
+      "gateway": "203.0.113.1",
+      "outputInterface": 2,
+      "outputInterfaceName": "ens3",
+      "protocol": "dhcp",
+      "scope": "universe",
+      "routeType": "unicast",
+      "metric": 100,
+      "table": 254,
+      "flags": [],
+      "sources": ["netlink"],
+      "notes": []
+    },
+    {
+      "family": "ipv4",
+      "destination": { "address": "203.0.113.0", "prefixLen": 24 },
+      "gateway": null,
+      "outputInterface": 2,
+      "outputInterfaceName": "ens3",
+      "protocol": "kernel",
+      "scope": "link",
+      "routeType": "unicast",
+      "metric": 0,
+      "table": 254,
+      "flags": [],
+      "sources": ["netlink"],
+      "notes": []
+    },
+    {
+      "family": "ipv4",
+      "destination": { "address": "10.8.0.4", "prefixLen": 30 },
+      "gateway": null,
+      "outputInterface": 5,
+      "outputInterfaceName": "tun0",
+      "protocol": "kernel",
+      "scope": "link",
+      "routeType": "unicast",
+      "metric": 0,
+      "table": 254,
+      "flags": [],
+      "sources": ["netlink"],
+      "notes": []
+    },
+    {
+      "family": "ipv4",
+      "destination": { "address": "203.0.113.24", "prefixLen": 32 },
+      "gateway": null,
+      "outputInterface": 2,
+      "outputInterfaceName": "ens3",
+      "protocol": "kernel",
+      "scope": "host",
+      "routeType": "local",
+      "metric": 0,
+      "table": 255,
+      "flags": [],
+      "sources": ["netlink"],
+      "notes": []
+    },
+    {
+      "family": "ipv4",
+      "destination": { "address": "127.0.0.0", "prefixLen": 8 },
+      "gateway": null,
+      "outputInterface": 1,
+      "outputInterfaceName": "lo",
+      "protocol": "kernel",
+      "scope": "host",
+      "routeType": "local",
+      "metric": 0,
+      "table": 255,
+      "flags": [],
+      "sources": ["netlink"],
+      "notes": []
+    }
+  ],
+  "providers": [
+    {
+      "provider": "netlink",
+      "state": "available",
+      "sections": [
+        { "section": "interfaces", "outcome": { "kind": "observed", "count": 3 } },
+        { "section": "addressesV4", "outcome": { "kind": "observed", "count": 3 } },
+        { "section": "addressesV6", "outcome": { "kind": "observed", "count": 1 } },
+        { "section": "routesV4", "outcome": { "kind": "observed", "count": 6 } },
+        { "section": "routesV6", "outcome": { "kind": "observed", "count": 0 } }
+      ],
+      "notes": []
+    },
+    {
+      "provider": "sysfs",
+      "state": "degraded",
+      "sections": [
+        { "section": "interfaces", "outcome": { "kind": "observed", "count": 3 } },
+        { "section": "addressesV4", "outcome": { "kind": "unsupported" } },
+        { "section": "addressesV6", "outcome": { "kind": "observed", "count": 1 } },
+        { "section": "routesV4", "outcome": { "kind": "observed", "count": 4 } },
+        { "section": "routesV6", "outcome": { "kind": "unsupported" } }
+      ],
+      "notes": [
+        "sysfs cannot distinguish dummy, veth, vlan and similar virtual interfaces from Ethernet (same ARPHRD type); netlink classification takes priority",
+        "/proc/net/if_inet6 exposes the address scope and IFA_F flag bits only; address labels are not available from procfs",
+        "route fields protocol/scope/type are not available from /proc/net/route"
+      ]
+    }
+  ]
+}

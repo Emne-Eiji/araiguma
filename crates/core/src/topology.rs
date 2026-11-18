@@ -1,0 +1,465 @@
+//! Model-driven topology projection (WO-02).
+//!
+//! A pure, deterministic projection from a [`NetworkSnapshot`] to a
+//! [`TopologyDocument`]: nodes and edges that are **only** backed by
+//! evidence. The rules (see `docs/design/wo-02-implementation.md`):
+//!
+//! * Every observed interface becomes a node — including unrecognized
+//!   kinds, which are preserved, never dropped.
+//! * Gateway nodes exist only when a route explicitly names a next-hop IP.
+//!   There are deliberately **no** internet/upstream/cloud nodes: nothing in
+//!   the observation model can prove an upstream, so none is invented.
+//! * Edges require evidence: `bridgeMember` and `vlanParent`/
+//!   `tunnelUnderlay` from the kernel's own master/parent statements,
+//!   `gatewayRoute` from a main-table route naming both oif and gateway,
+//!   and `gatewayInferred` only when a gateway without an oif falls inside
+//!   exactly one interface's subnet (the derivation is recorded).
+//! * Relationships that cannot be established (VPN peer, upstream beyond a
+//!   gateway) stay **unknown**: they appear as node annotations, never as
+//!   fabricated edges.
+
+use std::net::IpAddr;
+
+use serde::{Deserialize, Serialize};
+
+use crate::model::{
+    Address, AdminState, Interface, InterfaceKind, IpNet, ObservationSource, OperState, Route,
+    RT_TABLE_MAIN,
+};
+use crate::snapshot::NetworkSnapshot;
+
+pub const TOPOLOGY_SCHEMA_VERSION: u32 = 1;
+
+/// Identifies a topology node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NodeId {
+    Interface { ifindex: u32 },
+    Gateway { address: IpAddr },
+}
+
+/// What a node represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NodeKind {
+    Interface,
+    Gateway,
+}
+
+/// Coarse node state for layout/styling (honest derivation; gateway nodes
+/// are always `unknown` because reachability is never tested).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NodeState {
+    Active,
+    Inactive,
+    Unknown,
+}
+
+/// The kind of relationship an edge represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EdgeKind {
+    /// Interface is a bridge/bond port of the master interface
+    /// (IFLA_MASTER / sysfs master).
+    BridgeMember,
+    /// Interface's parent link (IFLA_LINK): vlan parent, tunnel underlay,
+    /// or another link-layer parent.
+    LinkParent,
+    /// A main-table route names both the output interface and the gateway.
+    GatewayRoute,
+    /// A route names the gateway but no output interface, and the gateway
+    /// falls inside exactly one interface's subnet.
+    GatewayInferred,
+}
+
+/// Why an edge exists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Evidence {
+    /// A single kernel fact states the relationship.
+    Observed { source: ObservationSource },
+    /// Derived from more than one observation; the derivation is recorded.
+    Inferred { reason: String },
+}
+
+/// Contextual detail attached to a node (enough for a details panel without
+/// re-joining the snapshot).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeDetail {
+    pub ifindex: Option<u32>,
+    pub addresses: Vec<Address>,
+    pub mac_address: Option<String>,
+    pub mtu: Option<u32>,
+    pub oper_state: Option<OperState>,
+    pub admin_state: Option<AdminState>,
+    pub master_ifindex: Option<u32>,
+    pub parent_ifindex: Option<u32>,
+    /// Routes whose output interface is this node (interface nodes only).
+    pub routes_using: usize,
+    /// Default routes among them.
+    pub default_routes: usize,
+    pub sources: Vec<ObservationSource>,
+    /// Provider-recorded caveats (verbatim from the interface).
+    pub notes: Vec<String>,
+}
+
+/// A topology node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyNode {
+    pub id: NodeId,
+    pub label: String,
+    pub node_kind: NodeKind,
+    /// Interface classification (interface nodes only).
+    pub interface_kind: Option<InterfaceKind>,
+    pub kind_detail: Option<String>,
+    pub state: NodeState,
+    /// Honest notes: unknown relationships, classification caveats,
+    /// on-link default routes, and similar.
+    pub annotations: Vec<String>,
+    pub detail: NodeDetail,
+}
+
+/// A topology edge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyEdge {
+    pub from: NodeId,
+    pub to: NodeId,
+    pub edge_kind: EdgeKind,
+    pub evidence: Evidence,
+    /// Human-readable context (destinations for gateway edges, parent
+    /// flavor for link-parent edges).
+    pub detail: Option<String>,
+}
+
+/// The projection result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyDocument {
+    pub schema_version: u32,
+    /// Timestamp of the source snapshot (the projection itself is
+    /// timeless/deterministic).
+    pub source_timestamp_ms: u64,
+    pub nodes: Vec<TopologyNode>,
+    pub edges: Vec<TopologyEdge>,
+}
+
+const GATEWAY_NOTE: &str =
+    "gateway observed via a routing-table entry; reachability is not tested — observation only";
+const NO_UPSTREAM_NOTE: &str =
+    "anything beyond this gateway (upstream or internet) is not observed";
+
+/// Project a snapshot into a topology document. Pure and deterministic.
+pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
+    let mut nodes: Vec<TopologyNode> = Vec::new();
+    let mut edges: Vec<TopologyEdge> = Vec::new();
+
+    // 1. Interface nodes — every observed interface, every kind.
+    for iface in &snapshot.interfaces {
+        nodes.push(interface_node(snapshot, iface));
+    }
+
+    // 2. Structural edges from the kernel's own master/parent statements.
+    for iface in &snapshot.interfaces {
+        if let Some(master) = iface.master_ifindex {
+            if snapshot.interface_by_ifindex(master).is_some() {
+                edges.push(TopologyEdge {
+                    from: NodeId::Interface {
+                        ifindex: iface.ifindex,
+                    },
+                    to: NodeId::Interface { ifindex: master },
+                    edge_kind: EdgeKind::BridgeMember,
+                    evidence: Evidence::Observed {
+                        source: primary_source(&iface.sources),
+                    },
+                    detail: Some("interface is a port of its master (IFLA_MASTER)".into()),
+                });
+            }
+        }
+        if let Some(parent) = iface.parent_ifindex {
+            if snapshot.interface_by_ifindex(parent).is_some() {
+                let flavor = match iface.kind {
+                    InterfaceKind::Tunnel => "tunnel underlay (IFLA_LINK)",
+                    InterfaceKind::Vlan => "vlan parent (IFLA_LINK)",
+                    _ => "parent link (IFLA_LINK)",
+                };
+                edges.push(TopologyEdge {
+                    from: NodeId::Interface {
+                        ifindex: iface.ifindex,
+                    },
+                    to: NodeId::Interface { ifindex: parent },
+                    edge_kind: EdgeKind::LinkParent,
+                    evidence: Evidence::Observed {
+                        source: primary_source(&iface.sources),
+                    },
+                    detail: Some(flavor.to_string()),
+                });
+            }
+        }
+    }
+
+    // 3. Gateway nodes and edges from main-table routes.
+    let main_routes: Vec<&Route> = snapshot
+        .routes
+        .iter()
+        .filter(|r| r.table == Some(RT_TABLE_MAIN as u32))
+        .collect();
+
+    // Group routes with a gateway by (oif, gateway) so one relationship is
+    // one edge, with the destinations aggregated in the detail.
+    let mut gateway_routes: Vec<(u32, IpAddr, Vec<&Route>)> = Vec::new();
+    let mut inferred_candidates: Vec<(IpAddr, &Route)> = Vec::new();
+    for route in &main_routes {
+        let Some(gateway) = route.gateway else {
+            continue;
+        };
+        match route.output_interface {
+            Some(oif) => {
+                if snapshot.interface_by_ifindex(oif).is_some() {
+                    match gateway_routes
+                        .iter_mut()
+                        .find(|(existing_oif, existing_gw, _)| {
+                            *existing_oif == oif && *existing_gw == gateway
+                        }) {
+                        Some((_, _, routes)) => routes.push(route),
+                        None => gateway_routes.push((oif, gateway, vec![route])),
+                    }
+                } else {
+                    // The oif itself is unobserved: keep the gateway node,
+                    // record the unknown, draw no edge.
+                    annotate_gateway(
+                        &mut nodes,
+                        gateway,
+                        format!(
+                            "one route reaches this gateway through an unobserved interface (ifindex {oif})"
+                        ),
+                    );
+                }
+            }
+            None => inferred_candidates.push((gateway, route)),
+        }
+    }
+
+    for (oif, gateway, routes) in gateway_routes {
+        let destinations = routes
+            .iter()
+            .map(|r| destination_label(r))
+            .collect::<Vec<_>>()
+            .join(", ");
+        ensure_gateway_node(&mut nodes, gateway);
+        edges.push(TopologyEdge {
+            from: NodeId::Interface { ifindex: oif },
+            to: NodeId::Gateway { address: gateway },
+            edge_kind: EdgeKind::GatewayRoute,
+            evidence: Evidence::Observed {
+                source: routes
+                    .first()
+                    .and_then(|r| r.sources.first().copied())
+                    .unwrap_or(ObservationSource::Netlink),
+            },
+            detail: Some(format!(
+                "{} via this gateway (main table 254)",
+                plural_routes(routes.len(), &destinations)
+            )),
+        });
+    }
+
+    for (gateway, route) in inferred_candidates {
+        let candidates = interfaces_containing(snapshot, gateway);
+        match candidates.as_slice() {
+            [only] => {
+                ensure_gateway_node(&mut nodes, gateway);
+                edges.push(TopologyEdge {
+                    from: NodeId::Interface { ifindex: only.ifindex },
+                    to: NodeId::Gateway { address: gateway },
+                    edge_kind: EdgeKind::GatewayInferred,
+                    evidence: Evidence::Inferred {
+                        reason: format!(
+                            "route names the gateway but no output interface; the gateway falls inside {}'s subnet",
+                            only.name
+                        ),
+                    },
+                    detail: Some(format!(
+                        "inferred from {} (main table 254)",
+                        destination_label(route)
+                    )),
+                });
+            }
+            _ => {
+                // Zero or several possible interfaces: the relationship
+                // stays unknown; no edge is invented.
+                ensure_gateway_node(&mut nodes, gateway);
+                annotate_gateway(
+                    &mut nodes,
+                    gateway,
+                    "the route has no output interface and the reaching interface is ambiguous or unknown".into(),
+                );
+            }
+        }
+    }
+
+    // Gateways referenced only through unobserved oifs must still exist.
+    // (annotate_gateway above already ensures their nodes.)
+
+    TopologyDocument {
+        schema_version: TOPOLOGY_SCHEMA_VERSION,
+        source_timestamp_ms: snapshot.timestamp_ms,
+        nodes,
+        edges,
+    }
+}
+
+fn interface_node(snapshot: &NetworkSnapshot, iface: &Interface) -> TopologyNode {
+    let addresses: Vec<Address> = snapshot
+        .addresses_on(iface.ifindex)
+        .into_iter()
+        .cloned()
+        .collect();
+    let routes_using = snapshot.routes_using_interface(iface.ifindex);
+    let default_routes = routes_using.iter().filter(|r| r.is_default()).count();
+
+    let state = node_state(iface);
+    let mut annotations = Vec::new();
+    if default_routes > 0 {
+        let via_gateway = routes_using
+            .iter()
+            .any(|r| r.is_default() && r.gateway.is_some());
+        if !via_gateway {
+            annotations.push(
+                "has a default route without a gateway (on-link next hop); anything beyond it is not observed"
+                    .into(),
+            );
+        }
+        annotations.push(NO_UPSTREAM_NOTE.into());
+    }
+    match iface.kind {
+        InterfaceKind::Wireguard => annotations.push(
+            "WireGuard peers and endpoints are not observable without privileges; the tunnel underlay is unknown"
+                .into(),
+        ),
+        InterfaceKind::Tunnel if iface.parent_ifindex.is_none() => {
+            annotations.push("tunnel underlay interface not observed".into());
+        }
+        _ => {}
+    }
+    annotations.extend(iface.notes.iter().cloned());
+
+    TopologyNode {
+        id: NodeId::Interface {
+            ifindex: iface.ifindex,
+        },
+        label: iface.name.clone(),
+        node_kind: NodeKind::Interface,
+        interface_kind: Some(iface.kind),
+        kind_detail: iface.kind_detail.clone(),
+        state,
+        annotations,
+        detail: NodeDetail {
+            ifindex: Some(iface.ifindex),
+            addresses,
+            mac_address: iface.mac_address.clone(),
+            mtu: iface.mtu,
+            oper_state: iface.oper_state,
+            admin_state: iface.admin_state,
+            master_ifindex: iface.master_ifindex,
+            parent_ifindex: iface.parent_ifindex,
+            routes_using: routes_using.len(),
+            default_routes,
+            sources: iface.sources.clone(),
+            notes: iface.notes.clone(),
+        },
+    }
+}
+
+fn node_state(iface: &Interface) -> NodeState {
+    if iface.admin_state == Some(AdminState::Down) {
+        return NodeState::Inactive;
+    }
+    match iface.oper_state {
+        Some(OperState::Up) => NodeState::Active,
+        Some(OperState::Down) | Some(OperState::LowerLayerDown) | Some(OperState::NotPresent) => {
+            NodeState::Inactive
+        }
+        // Includes the kernel's UNKNOWN for loopback/dummy while up:
+        // honest, never dressed up as active.
+        _ => NodeState::Unknown,
+    }
+}
+
+fn ensure_gateway_node(nodes: &mut Vec<TopologyNode>, gateway: IpAddr) {
+    if nodes
+        .iter()
+        .any(|n| n.id == NodeId::Gateway { address: gateway })
+    {
+        return;
+    }
+    nodes.push(TopologyNode {
+        id: NodeId::Gateway { address: gateway },
+        label: gateway.to_string(),
+        node_kind: NodeKind::Gateway,
+        interface_kind: None,
+        kind_detail: None,
+        state: NodeState::Unknown,
+        annotations: vec![GATEWAY_NOTE.to_string(), NO_UPSTREAM_NOTE.to_string()],
+        detail: NodeDetail::default(),
+    });
+}
+
+fn annotate_gateway(nodes: &mut Vec<TopologyNode>, gateway: IpAddr, note: String) {
+    ensure_gateway_node(nodes, gateway);
+    if let Some(node) = nodes
+        .iter_mut()
+        .find(|n| n.id == NodeId::Gateway { address: gateway })
+    {
+        if !node.annotations.contains(&note) {
+            node.annotations.push(note);
+        }
+    }
+}
+
+fn primary_source(sources: &[ObservationSource]) -> ObservationSource {
+    sources
+        .first()
+        .copied()
+        .unwrap_or(ObservationSource::Netlink)
+}
+
+/// Interfaces with an address whose prefix contains `address`.
+fn interfaces_containing(snapshot: &NetworkSnapshot, address: IpAddr) -> Vec<&Interface> {
+    let mut result = Vec::new();
+    for iface in &snapshot.interfaces {
+        let contained = snapshot
+            .addresses_on(iface.ifindex)
+            .iter()
+            .any(|a| IpNet::new(a.address, a.prefix_len).contains(address));
+        if contained {
+            result.push(iface);
+        }
+    }
+    result
+}
+
+fn destination_label(route: &Route) -> String {
+    route
+        .destination
+        .as_ref()
+        .map(|d| {
+            if d.is_default() {
+                "default".to_string()
+            } else {
+                d.to_string()
+            }
+        })
+        .unwrap_or_else(|| "unknown destination".to_string())
+}
+
+fn plural_routes(count: usize, destinations: &str) -> String {
+    if count == 1 {
+        destinations.to_string()
+    } else {
+        format!("{count} routes: {destinations}")
+    }
+}

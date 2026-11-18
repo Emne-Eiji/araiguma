@@ -1,0 +1,442 @@
+{
+  "schemaVersion": 1,
+  "sourceTimestampMs": 1765824003000,
+  "nodes": [
+    {
+      "id": {
+        "interface": {
+          "ifindex": 1
+        }
+      },
+      "label": "lo",
+      "nodeKind": "interface",
+      "interfaceKind": "loopback",
+      "kindDetail": null,
+      "state": "unknown",
+      "annotations": [],
+      "detail": {
+        "ifindex": 1,
+        "addresses": [
+          {
+            "ifindex": 1,
+            "family": "ipv4",
+            "address": "127.0.0.1",
+            "prefixLen": 8,
+            "scope": "host",
+            "flags": [
+              "permanent"
+            ],
+            "label": null,
+            "sources": [
+              "netlink"
+            ]
+          }
+        ],
+        "macAddress": "00:00:00:00:00:00",
+        "mtu": 65536,
+        "operState": "unknown",
+        "adminState": "up",
+        "masterIfindex": null,
+        "parentIfindex": null,
+        "routesUsing": 0,
+        "defaultRoutes": 0,
+        "sources": [
+          "netlink",
+          "sysfs"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": {
+        "interface": {
+          "ifindex": 2
+        }
+      },
+      "label": "eth0",
+      "nodeKind": "interface",
+      "interfaceKind": "ethernet",
+      "kindDetail": null,
+      "state": "active",
+      "annotations": [
+        "anything beyond this gateway (upstream or internet) is not observed"
+      ],
+      "detail": {
+        "ifindex": 2,
+        "addresses": [
+          {
+            "ifindex": 2,
+            "family": "ipv4",
+            "address": "192.168.1.10",
+            "prefixLen": 24,
+            "scope": "global",
+            "flags": null,
+            "label": null,
+            "sources": [
+              "netlink"
+            ]
+          },
+          {
+            "ifindex": 2,
+            "family": "ipv6",
+            "address": "fe80::5054:ff:fe11:2233",
+            "prefixLen": 64,
+            "scope": "link",
+            "flags": [
+              "permanent"
+            ],
+            "label": null,
+            "sources": [
+              "netlink",
+              "procfs"
+            ]
+          }
+        ],
+        "macAddress": "52:54:00:11:22:33",
+        "mtu": 1500,
+        "operState": "up",
+        "adminState": "up",
+        "masterIfindex": null,
+        "parentIfindex": null,
+        "routesUsing": 2,
+        "defaultRoutes": 1,
+        "sources": [
+          "netlink",
+          "sysfs"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": {
+        "interface": {
+          "ifindex": 3
+        }
+      },
+      "label": "eth0.100",
+      "nodeKind": "interface",
+      "interfaceKind": "vlan",
+      "kindDetail": "vlan",
+      "state": "active",
+      "annotations": [],
+      "detail": {
+        "ifindex": 3,
+        "addresses": [
+          {
+            "ifindex": 3,
+            "family": "ipv4",
+            "address": "10.100.0.1",
+            "prefixLen": 24,
+            "scope": "global",
+            "flags": null,
+            "label": null,
+            "sources": [
+              "netlink"
+            ]
+          }
+        ],
+        "macAddress": "52:54:00:11:22:33",
+        "mtu": 1500,
+        "operState": "up",
+        "adminState": "up",
+        "masterIfindex": null,
+        "parentIfindex": 2,
+        "routesUsing": 1,
+        "defaultRoutes": 0,
+        "sources": [
+          "netlink"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": {
+        "interface": {
+          "ifindex": 4
+        }
+      },
+      "label": "br0",
+      "nodeKind": "interface",
+      "interfaceKind": "bridge",
+      "kindDetail": "bridge",
+      "state": "active",
+      "annotations": [],
+      "detail": {
+        "ifindex": 4,
+        "addresses": [
+          {
+            "ifindex": 4,
+            "family": "ipv4",
+            "address": "172.16.0.1",
+            "prefixLen": 24,
+            "scope": "global",
+            "flags": null,
+            "label": null,
+            "sources": [
+              "netlink"
+            ]
+          }
+        ],
+        "macAddress": "52:54:00:44:55:66",
+        "mtu": 1500,
+        "operState": "up",
+        "adminState": "up",
+        "masterIfindex": null,
+        "parentIfindex": null,
+        "routesUsing": 1,
+        "defaultRoutes": 0,
+        "sources": [
+          "netlink",
+          "sysfs"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": {
+        "interface": {
+          "ifindex": 5
+        }
+      },
+      "label": "eth1",
+      "nodeKind": "interface",
+      "interfaceKind": "ethernet",
+      "kindDetail": null,
+      "state": "active",
+      "annotations": [],
+      "detail": {
+        "ifindex": 5,
+        "addresses": [
+          {
+            "ifindex": 5,
+            "family": "ipv4",
+            "address": "172.16.0.2",
+            "prefixLen": 24,
+            "scope": "global",
+            "flags": null,
+            "label": null,
+            "sources": [
+              "netlink"
+            ]
+          }
+        ],
+        "macAddress": "52:54:00:aa:bb:cc",
+        "mtu": 1500,
+        "operState": "up",
+        "adminState": "up",
+        "masterIfindex": 4,
+        "parentIfindex": null,
+        "routesUsing": 0,
+        "defaultRoutes": 0,
+        "sources": [
+          "netlink",
+          "sysfs"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": {
+        "interface": {
+          "ifindex": 6
+        }
+      },
+      "label": "veth0",
+      "nodeKind": "interface",
+      "interfaceKind": "veth",
+      "kindDetail": "veth",
+      "state": "active",
+      "annotations": [],
+      "detail": {
+        "ifindex": 6,
+        "addresses": [
+          {
+            "ifindex": 6,
+            "family": "ipv4",
+            "address": "10.1.1.1",
+            "prefixLen": 24,
+            "scope": "global",
+            "flags": null,
+            "label": null,
+            "sources": [
+              "netlink"
+            ]
+          }
+        ],
+        "macAddress": "a2:1b:3c:4d:5e:6f",
+        "mtu": 1500,
+        "operState": "up",
+        "adminState": "up",
+        "masterIfindex": null,
+        "parentIfindex": null,
+        "routesUsing": 1,
+        "defaultRoutes": 0,
+        "sources": [
+          "netlink"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": {
+        "interface": {
+          "ifindex": 7
+        }
+      },
+      "label": "veth1",
+      "nodeKind": "interface",
+      "interfaceKind": "veth",
+      "kindDetail": "veth",
+      "state": "active",
+      "annotations": [],
+      "detail": {
+        "ifindex": 7,
+        "addresses": [
+          {
+            "ifindex": 7,
+            "family": "ipv4",
+            "address": "10.1.1.2",
+            "prefixLen": 24,
+            "scope": "global",
+            "flags": null,
+            "label": null,
+            "sources": [
+              "netlink"
+            ]
+          }
+        ],
+        "macAddress": "a2:1b:3c:4d:5e:70",
+        "mtu": 1500,
+        "operState": "up",
+        "adminState": "up",
+        "masterIfindex": null,
+        "parentIfindex": null,
+        "routesUsing": 0,
+        "defaultRoutes": 0,
+        "sources": [
+          "netlink"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": {
+        "interface": {
+          "ifindex": 8
+        }
+      },
+      "label": "dummy1",
+      "nodeKind": "interface",
+      "interfaceKind": "dummy",
+      "kindDetail": "dummy",
+      "state": "unknown",
+      "annotations": [],
+      "detail": {
+        "ifindex": 8,
+        "addresses": [],
+        "macAddress": "66:2d:1a:77:88:99",
+        "mtu": 1500,
+        "operState": "unknown",
+        "adminState": "up",
+        "masterIfindex": null,
+        "parentIfindex": null,
+        "routesUsing": 0,
+        "defaultRoutes": 0,
+        "sources": [
+          "netlink",
+          "sysfs"
+        ],
+        "notes": []
+      }
+    },
+    {
+      "id": {
+        "gateway": {
+          "address": "192.168.1.1"
+        }
+      },
+      "label": "192.168.1.1",
+      "nodeKind": "gateway",
+      "interfaceKind": null,
+      "kindDetail": null,
+      "state": "unknown",
+      "annotations": [
+        "gateway observed via a routing-table entry; reachability is not tested — observation only",
+        "anything beyond this gateway (upstream or internet) is not observed"
+      ],
+      "detail": {
+        "ifindex": null,
+        "addresses": [],
+        "macAddress": null,
+        "mtu": null,
+        "operState": null,
+        "adminState": null,
+        "masterIfindex": null,
+        "parentIfindex": null,
+        "routesUsing": 0,
+        "defaultRoutes": 0,
+        "sources": [],
+        "notes": []
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": {
+        "interface": {
+          "ifindex": 3
+        }
+      },
+      "to": {
+        "interface": {
+          "ifindex": 2
+        }
+      },
+      "edgeKind": "linkParent",
+      "evidence": {
+        "observed": {
+          "source": "netlink"
+        }
+      },
+      "detail": "vlan parent (IFLA_LINK)"
+    },
+    {
+      "from": {
+        "interface": {
+          "ifindex": 5
+        }
+      },
+      "to": {
+        "interface": {
+          "ifindex": 4
+        }
+      },
+      "edgeKind": "bridgeMember",
+      "evidence": {
+        "observed": {
+          "source": "netlink"
+        }
+      },
+      "detail": "interface is a port of its master (IFLA_MASTER)"
+    },
+    {
+      "from": {
+        "interface": {
+          "ifindex": 2
+        }
+      },
+      "to": {
+        "gateway": {
+          "address": "192.168.1.1"
+        }
+      },
+      "edgeKind": "gatewayRoute",
+      "evidence": {
+        "observed": {
+          "source": "netlink"
+        }
+      },
+      "detail": "default via this gateway (main table 254)"
+    }
+  ]
+}
