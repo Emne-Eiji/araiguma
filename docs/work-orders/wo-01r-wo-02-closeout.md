@@ -95,14 +95,24 @@ was never modified.
 
 ## A4. Git commits and identity verification
 
-14 commits, `1a939dc`…`6744c4e` (list below). Every commit's author and
-committer is `Emne <https://github.com/Emne-Eiji>` (repository-local config;
+> **Corrected by the WO-02 correction work order (§10).** The original text
+> below reported "14 commits, `1a939dc`…`6744c4e`" — it omitted the final
+> closeout commit `026af6b` ("docs: record WO-01R + WO-02 closeout") that
+> this very document was written in. The recovery manifest
+> (`araiguma-FINAL.sha256`) was correct: **the final WO-02 repository
+> contains 15 commits**, of which 14 were the implementation milestones
+> `1a939dc`…`6744c4e` and the 15th was the final closeout commit `026af6b`
+> at HEAD. History was not rewritten; only this report is corrected.
+
+15 commits, `1a939dc`…`026af6b`. Every commit's author and committer is
+`Emne <https://github.com/Emne-Eiji>` (repository-local config;
 the sandbox global identity was never used). No remote is configured;
 working tree clean; single `main` branch. The original 11-commit history is
 unrecoverable; the 11-vs-10 discrepancy is recorded as permanently
 unresolved in the incident record — no reconciliation invented.
 
 ```
+026af6b docs: record WO-01R + WO-02 closeout          <- final closeout commit
 6744c4e docs: update README and architecture for WO-02 features
 f58d5f5 feat: implement interactive topology, route presentation, and provider status
 9da86b0 feat: add network topology transformation
@@ -259,12 +269,31 @@ precise manual sync procedure is documented in `docs/development.md`.
 
 ## B5. Exact tests and results
 
+> **Corrected by the WO-02 correction work order (§10).** The original text
+> reported "52 Rust" tests. The source contained **53 declared test
+> functions** (50 `#[test]` + 3 `#[tokio::test]`), and all 53 executed —
+> but the netns integration tests use a self-re-exec pattern (each test
+> spawns itself under `unshare -Urn` with `--exact`), and that pattern
+> called `process::exit` in the parent after the FIRST child completed.
+> The netns parent harness therefore never printed its own summary; the
+> re-exec'd children printed asynchronous "1 passed; 2 filtered out"
+> summaries that the gate's `tail -n 40` capture truncated, and summing
+> the visible lines yielded 52 — one child summary lost to the race. The
+> deeper defect the correction then uncovered and fixed: the orphaned
+> children's exit codes were never checked, which is how a genuinely
+> failing netns test (`netns_monitor_detects…`, whose route setup never
+> worked on this kernel — no connected route for an address on a DOWN
+> interface) stayed hidden behind a green gate. With the corrected pattern
+> (every child asserted, parent summaries deterministic) the declared and
+> executed counts reconcile exactly. No test was skipped or filtered.
+
 Same gate as A3 (**PASS 12/12**), with the WO-02 additions: 6 Rust topology
 tests (including negative assertions), topology-golden stability in the
 gate, 17 new vitest tests (golden invariants, parse rejection, filtering
 semantics, missing-field semantics), 4 new Playwright tests (topology
 counts/legend/selection/overlay-not-shrink, routes filtering/defaults/
-linkage, provider honesty, cross-view navigation). Totals: **52 Rust, 34
+linkage, provider honesty, cross-view navigation). Totals at the final
+WO-02 gate: **53 Rust (declared = executed; see correction above), 34
 vitest, 7 Playwright**, plus 11 live binary checks and the D-Bus harness
 capability check.
 
