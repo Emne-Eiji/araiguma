@@ -118,14 +118,44 @@ pub fn merge(observations: Vec<ProviderObservation>, timestamp_ms: u64) -> Netwo
     }
 }
 
-fn route_sort_key(route: &Route) -> (u8, u32, u8, Option<IpNet>, Option<u32>, Option<IpAddr>) {
+/// Display order for the merged route list (WO-02 correction §3).
+///
+/// Rules, in priority order:
+/// 1. Address family groups (IPv4 before IPv6) — never interleaved.
+/// 2. Routing-table groups (ascending table id; a not-observed table is
+///    grouped with the main table, matching the merge identity). Routes
+///    from different tables are never merged into one ordering group.
+/// 3. Within a family+table group: observed destinations first, and among
+///    them prefix length ascending — default routes (prefix length 0)
+///    first, then progressively more-specific prefixes (broader before
+///    narrower, matching `ip route`'s presentation). Routes whose
+///    destination was not observed sort after every observed destination.
+/// 4. Deterministic tie-breaking within the same prefix: metric ascending
+///    (a not-observed metric sorts after every observed value — no
+///    preference is invented), then gateway (on-link before a named
+///    gateway), which keeps multiple default routes in a stable order.
+///
+/// Sort key for the merged route list (see [`route_sort_key`]): family,
+/// table, destination-not-observed flag, (prefix length, address), metric
+/// (not-observed last), gateway.
+type RouteSortKey = (
+    u8,
+    u32,
+    u8,
+    Option<(u8, IpAddr)>,
+    (bool, u32),
+    Option<IpAddr>,
+);
+
+fn route_sort_key(route: &Route) -> RouteSortKey {
     (
         route.family as u8,
         route.table.unwrap_or(RT_TABLE_MAIN as u32),
-        // default routes first within a table
-        u8::MAX - route.destination.as_ref().map_or(0, |d| d.prefix_len),
-        route.destination,
-        route.metric,
+        route.destination.is_none() as u8,
+        route
+            .destination
+            .map(|destination| (destination.prefix_len, destination.address)),
+        (route.metric.is_none(), route.metric.unwrap_or(0)),
         route.gateway,
     )
 }
