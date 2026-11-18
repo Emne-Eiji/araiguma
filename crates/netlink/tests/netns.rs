@@ -689,3 +689,204 @@ async fn netns_ipv6_procfs_routes_merge_and_fallback() {
         "a missing /proc/net/ipv6_route fails the section instead of claiming zero routes"
     );
 }
+
+#[tokio::test]
+async fn netns_combined_observation_integrates_all_wo03_features() {
+    // WO-03 integration: one namespace, one observation run, every
+    // milestone together — a veth pair (M2), a multipath route (M3), and
+    // IPv6 routes from /proc/net/ipv6_route (M4) — through both providers,
+    // the merge, and the topology projection. The point is that these are
+    // one consistent application, not isolated demos.
+    if !ensure_netns("netns_combined_observation_integrates_all_wo03_features") {
+        return; // parent: the child already ran and was asserted
+    }
+
+    ip(&["link", "set", "lo", "up"]);
+    // A veth pair (M2) and a dummy (for the multipath route's second hop).
+    ip(&[
+        "link",
+        "add",
+        "ar-c-veth0",
+        "type",
+        "veth",
+        "peer",
+        "name",
+        "ar-c-veth1",
+    ]);
+    ip(&["link", "set", "ar-c-veth0", "up"]);
+    ip(&["link", "set", "ar-c-veth1", "up"]);
+    ip(&[
+        "address",
+        "add",
+        "10.20.0.1/24",
+        "dev",
+        "ar-c-veth0",
+        "nodad",
+    ]);
+    ip(&[
+        "address",
+        "add",
+        "10.21.0.1/24",
+        "dev",
+        "ar-c-veth1",
+        "nodad",
+    ]);
+    ip(&["link", "add", "ar-c-dummy0", "type", "dummy"]);
+    ip(&["link", "set", "ar-c-dummy0", "up"]);
+    ip(&["address", "add", "10.22.0.1/24", "dev", "ar-c-dummy0"]);
+    // A multipath route across the veth and the dummy (M3).
+    ip(&[
+        "route",
+        "add",
+        "10.99.0.0/24",
+        "nexthop",
+        "via",
+        "10.20.0.2",
+        "dev",
+        "ar-c-veth0",
+        "weight",
+        "2",
+        "nexthop",
+        "via",
+        "10.22.0.2",
+        "dev",
+        "ar-c-dummy0",
+        "weight",
+        "5",
+    ]);
+    // An IPv6 gateway route (M4).
+    ip(&[
+        "address",
+        "add",
+        "2001:db8:20::1/64",
+        "dev",
+        "ar-c-veth0",
+        "nodad",
+    ]);
+    ip(&[
+        "route",
+        "add",
+        "2001:db8:99::/64",
+        "via",
+        "2001:db8:20::2",
+        "dev",
+        "ar-c-veth0",
+    ]);
+
+    let mut netlink = NetlinkProvider::new();
+    let netlink_observation = netlink.observe().await;
+    let mut sysfs = araiguma_sysfs::SysFsProvider::new();
+    let sysfs_observation = sysfs.observe().await;
+    let snapshot = araiguma_core::merge::merge(vec![netlink_observation, sysfs_observation], 11);
+
+    // M2: the veth pair carries mutual peers and exactly one deduplicated
+    // topology edge (checked in depth by its own test; here the pair must
+    // simply survive the combined observation).
+    let veth0 = snapshot
+        .interfaces
+        .iter()
+        .find(|i| i.name == "ar-c-veth0")
+        .expect("veth end observed");
+    let veth1 = snapshot
+        .interfaces
+        .iter()
+        .find(|i| i.name == "ar-c-veth1")
+        .expect("veth end observed");
+    assert_eq!(veth0.kind, InterfaceKind::Veth);
+    assert!(veth0.peer_ifindex.is_some() && veth1.peer_ifindex.is_some());
+
+    // M3: the multipath route with its FULL hop set; procfs's first-hop
+    // view merged in rather than duplicating.
+    let multipath: Vec<_> = snapshot
+        .routes
+        .iter()
+        .filter(|r| {
+            r.destination
+                .as_ref()
+                .is_some_and(|d| d.to_string() == "10.99.0.0/24")
+        })
+        .collect();
+    assert_eq!(multipath.len(), 1, "one kernel route: {multipath:?}");
+    let route = multipath[0];
+    assert!(route.sources.contains(&ObservationSource::ProcFs));
+    use araiguma_core::model::NextHops;
+    let NextHops::Multi(hops) = &route.next_hops else {
+        panic!("full hop set expected, got {:?}", route.next_hops);
+    };
+    assert_eq!(hops.len(), 2);
+    let weights: std::collections::BTreeSet<_> = hops.iter().map(|h| h.weight).collect();
+    assert!(weights.contains(&Some(2)) && weights.contains(&Some(5)));
+
+    // M4: the IPv6 gateway route appears once with united provenance and
+    // netlink's table attribution; the v6 local-table routes deduplicated
+    // by the table-less wildcard.
+    let v6_gateway: Vec<_> = snapshot
+        .routes
+        .iter()
+        .filter(|r| {
+            r.destination
+                .as_ref()
+                .is_some_and(|d| d.to_string() == "2001:db8:99::/64")
+        })
+        .collect();
+    assert_eq!(v6_gateway.len(), 1, "one kernel v6 route: {v6_gateway:?}");
+    assert_eq!(v6_gateway[0].gateway.unwrap().to_string(), "2001:db8:20::2");
+    assert!(
+        v6_gateway[0].sources.contains(&ObservationSource::Netlink)
+            && v6_gateway[0].sources.contains(&ObservationSource::ProcFs)
+    );
+    let loopback: Vec<_> = snapshot
+        .routes
+        .iter()
+        .filter(|r| {
+            r.destination
+                .as_ref()
+                .is_some_and(|d| d.to_string() == "::1/128")
+        })
+        .collect();
+    assert_eq!(
+        loopback.len(),
+        1,
+        "no ::1/128 duplicate in the combined run"
+    );
+
+    // The topology projection integrates everything: the veth peer edge,
+    // gateway nodes for both families, and a schema-v3 document.
+    let topology = araiguma_core::topology::build_topology(&snapshot);
+    assert_eq!(topology.schema_version, 3);
+    let peer_edges: Vec<_> = topology
+        .edges
+        .iter()
+        .filter(|e| e.edge_kind == araiguma_core::topology::EdgeKind::VethPeer)
+        .collect();
+    assert_eq!(peer_edges.len(), 1, "one deduplicated veth edge");
+    let v6_gw_node = topology
+        .nodes
+        .iter()
+        .any(|n| matches!(n.id, araiguma_core::topology::NodeId::Gateway { address } if address.to_string() == "2001:db8:20::2"));
+    assert!(v6_gw_node, "the v6 gateway is a node");
+    let v4_gw_node = topology
+        .nodes
+        .iter()
+        .any(|n| matches!(n.id, araiguma_core::topology::NodeId::Gateway { address } if address.to_string() == "10.20.0.2"));
+    assert!(v4_gw_node, "a multipath hop's gateway is a node");
+
+    // Cross-validation: iproute2 agrees about all three.
+    let show = |args: &[&str]| {
+        let output = Command::new("ip").args(args).output().expect("ip");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    let mp = show(&["route", "show", "10.99.0.0/24"]);
+    assert!(
+        mp.contains("nexthop via 10.20.0.2 dev ar-c-veth0 weight 2"),
+        "{mp}"
+    );
+    assert!(
+        mp.contains("nexthop via 10.22.0.2 dev ar-c-dummy0 weight 5"),
+        "{mp}"
+    );
+    let v6 = show(&["-6", "route", "show", "2001:db8:99::/64"]);
+    assert!(v6.contains("via 2001:db8:20::2 dev ar-c-veth0"), "{v6}");
+    let peers = show(&["-d", "link", "show", "ar-c-veth0"]);
+    assert!(peers.contains("veth"), "{peers}");
+}

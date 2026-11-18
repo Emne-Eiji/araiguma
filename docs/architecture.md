@@ -195,7 +195,7 @@ deliberately no internet/upstream nodes. Edges require evidence:
 | `bondMember` | kernel master statement **and the master's own kind observed as a bond** |
 | `masterMember` | kernel master statement where the master's type could not be established — presented neutrally, never assumed to be a bridge |
 | `linkParent` | kernel parent statement (IFLA_LINK: vlan parent, tunnel underlay) |
-| `gatewayRoute` | a main-table route names both oif and gateway (destinations aggregated) |
+| `gatewayRoute` | a main-table route names both oif and gateway (destinations aggregated); a multipath route (WO-03 M3) contributes EVERY hop as the same evidence class — one edge per (interface, gateway) pair, with the kernel weight in the edge detail |
 | `gatewayInferred` | gateway without oif falls inside exactly one interface's subnet (reason recorded) |
 
 A master or parent ifindex that names a missing interface produces an

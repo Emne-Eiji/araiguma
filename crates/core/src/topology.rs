@@ -28,8 +28,8 @@ use std::net::IpAddr;
 use serde::{Deserialize, Serialize};
 
 use crate::model::{
-    Address, AdminState, Interface, InterfaceKind, IpNet, MacObservation, ObservationSource,
-    OperState, Route, RouteType, RT_TABLE_MAIN,
+    Address, AdminState, Interface, InterfaceKind, IpNet, MacObservation, NextHops,
+    ObservationSource, OperState, Route, RouteType, RT_TABLE_MAIN,
 };
 use crate::snapshot::NetworkSnapshot;
 
@@ -375,43 +375,59 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
 
     // Group routes with a gateway by (oif, gateway) so one relationship is
     // one edge, with the destinations aggregated in the detail.
-    let mut gateway_routes: Vec<(u32, IpAddr, Vec<&Route>)> = Vec::new();
+    //
+    // A multipath route (WO-03 M3) contributes EVERY hop as the same
+    // evidence class — an observed output interface plus an observed
+    // gateway — so its hops draw gateway relationships exactly like
+    // single-path routes, with the kernel weight recorded in the detail.
+    // (The route-level gateway/oif are None for multipath routes by
+    // design; reading only them would silently drop every hop.)
+    let mut gateway_routes: Vec<GatewayGroup> = Vec::new();
     let mut inferred_candidates: Vec<(IpAddr, &Route)> = Vec::new();
+
     for route in &main_routes {
-        let Some(gateway) = route.gateway else {
-            continue;
-        };
-        match route.output_interface {
-            Some(oif) => {
-                if snapshot.interface_by_ifindex(oif).is_some() {
-                    match gateway_routes
-                        .iter_mut()
-                        .find(|(existing_oif, existing_gw, _)| {
-                            *existing_oif == oif && *existing_gw == gateway
-                        }) {
-                        Some((_, _, routes)) => routes.push(route),
-                        None => gateway_routes.push((oif, gateway, vec![route])),
-                    }
-                } else {
-                    // The oif itself is unobserved: keep the gateway node,
-                    // record the unknown, draw no edge.
-                    annotate_gateway(
+        match &route.next_hops {
+            NextHops::Single => record_gateway(
+                snapshot,
+                &mut nodes,
+                &mut gateway_routes,
+                &mut inferred_candidates,
+                route,
+                route.output_interface,
+                route.gateway,
+                None,
+            ),
+            NextHops::Multi(hops) => {
+                for hop in hops {
+                    record_gateway(
+                        snapshot,
                         &mut nodes,
-                        gateway,
-                        format!(
-                            "one route reaches this gateway through an unobserved interface (ifindex {oif})"
-                        ),
+                        &mut gateway_routes,
+                        &mut inferred_candidates,
+                        route,
+                        hop.output_interface,
+                        hop.gateway,
+                        hop.weight,
                     );
                 }
             }
-            None => inferred_candidates.push((gateway, route)),
+            // An undecodable hop set carries no usable (oif, gateway)
+            // evidence; the routes view shows the limitation. Nothing is
+            // invented here.
+            NextHops::Undecoded(_) => {}
         }
     }
 
     for (oif, gateway, routes) in gateway_routes {
         let destinations = routes
             .iter()
-            .map(|r| destination_label(r))
+            .map(|(route, weight)| {
+                let label = destination_label(route);
+                match weight {
+                    Some(weight) => format!("{label} (multipath next hop, kernel weight {weight})"),
+                    None => label,
+                }
+            })
             .collect::<Vec<_>>()
             .join(", ");
         ensure_gateway_node(&mut nodes, gateway);
@@ -422,7 +438,7 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
             evidence: Evidence::Observed {
                 source: routes
                     .first()
-                    .and_then(|r| r.sources.first().copied())
+                    .and_then(|(route, _)| route.sources.first().copied())
                     .unwrap_or(ObservationSource::Netlink),
             },
             detail: Some(format!(
@@ -493,6 +509,55 @@ fn is_unusable_route(route: &Route) -> bool {
         .flags
         .as_ref()
         .is_some_and(|flags| flags.iter().any(|flag| flag == "reject"))
+}
+
+/// One aggregated (oif, gateway) relationship: the contributing routes,
+/// each tagged with its kernel weight when the evidence is a multipath
+/// next hop (WO-03 M3; `None` for single-path route-level pairs).
+type GatewayGroup<'a> = (u32, IpAddr, Vec<(&'a Route, Option<u16>)>);
+
+/// Record one observed (oif, gateway) pair of a route — the route-level
+/// pair for single-path routes, or one hop of a multipath route (WO-03
+/// M3). A pair with a known oif and observed interface groups into an
+/// edge; a gateway without an oif becomes an inference candidate; an
+/// unobserved oif keeps the gateway node and records the unknown.
+#[allow(clippy::too_many_arguments)]
+fn record_gateway<'a>(
+    snapshot: &NetworkSnapshot,
+    nodes: &mut Vec<TopologyNode>,
+    gateway_routes: &mut Vec<GatewayGroup<'a>>,
+    inferred_candidates: &mut Vec<(IpAddr, &'a Route)>,
+    route: &'a Route,
+    oif: Option<u32>,
+    gateway: Option<IpAddr>,
+    weight: Option<u16>,
+) {
+    let Some(gateway) = gateway else { return };
+    match oif {
+        Some(oif) => {
+            if snapshot.interface_by_ifindex(oif).is_some() {
+                match gateway_routes
+                    .iter_mut()
+                    .find(|(existing_oif, existing_gw, _)| {
+                        *existing_oif == oif && *existing_gw == gateway
+                    }) {
+                    Some((_, _, routes)) => routes.push((route, weight)),
+                    None => gateway_routes.push((oif, gateway, vec![(route, weight)])),
+                }
+            } else {
+                // The oif itself is unobserved: keep the gateway node,
+                // record the unknown, draw no edge.
+                annotate_gateway(
+                    nodes,
+                    gateway,
+                    format!(
+                        "one route reaches this gateway through an unobserved interface (ifindex {oif})"
+                    ),
+                );
+            }
+        }
+        None => inferred_candidates.push((gateway, route)),
+    }
 }
 
 fn interface_node(snapshot: &NetworkSnapshot, iface: &Interface) -> TopologyNode {

@@ -25,6 +25,17 @@ ip link set ar-live0 up
 ip address add 192.0.2.10/24 dev ar-live0
 ip address add fd00:d0:0:1::10/64 dev ar-live0 nodad
 ip route add default via 192.0.2.1 dev ar-live0
+# WO-03 live integration: a multipath route (M3) and an IPv6 gateway route
+# (M4) observed by the real binary alongside everything else.
+ip link add ar-live1 type dummy
+ip link set ar-live1 up
+ip address add 198.51.100.10/24 dev ar-live1
+# ar-live0 needs an address in 198.51.100.0/24 for the multipath route's
+# second-hop gateway to be on-link (the kernel rejects off-link nexthop
+# gateways — discovery note 12).
+ip address add 198.51.100.20/24 dev ar-live0
+ip route add 203.0.114.0/24 nexthop via 198.51.100.1 dev ar-live1 weight 2 nexthop via 198.51.100.2 dev ar-live0 weight 3
+ip route add 2001:db8:114::/64 via fd00:d0:0:1::1 dev ar-live0
 
 fail() { echo "live-check: FAIL — $*" >&2; exit 1; }
 check() { # check <description> <jq expression>
@@ -54,6 +65,22 @@ check "local table (255) present in the full dump" \
 check "netlink provider available" '.providers[0].state == "available"'
 check "sysfs provider degraded (known fidelity limits)" '.providers[1].state == "degraded"'
 
+# --- WO-03 feature checks (M3 multipath, M4 IPv6 procfs) ----------------------
+check "multipath route carries its FULL next-hop set (WO-03 M3)" \
+  '.routes | any(.destination.address == "203.0.114.0" and .nextHops.multi and (.nextHops.multi | length == 2) and ((.nextHops.multi | map(.weight) | sort) == [2, 3]))'
+check "multipath route-level gateway stays null (hops carry them)" \
+  '.routes | any(.destination.address == "203.0.114.0" and .gateway == null and .outputInterface == null)'
+check "multipath route united with the procfs first-hop view" \
+  '.routes | any(.destination.address == "203.0.114.0" and (.sources | index("procfs") != null))'
+check "IPv6 gateway route observed once with united provenance (WO-03 M4)" \
+  '[.routes[] | select(.destination.address == "2001:db8:114::")] | length == 1 and (.[] | .gateway == "fd00:d0:0:1::1") and ((.[] | .sources) | index("procfs") != null)'
+check "IPv6 local-table ::1/128 deduplicated against netlink by the table-less wildcard" \
+  '[.routes[] | select(.destination.address == "::1")] | length == 1 and (.[] | .table == 255)'
+check "the kernel's IPv6 unreachable-default sentinel is kept (procfs-only, table not observed)" \
+  '.routes | any(.family == "ipv6" and .destination.prefixLen == 0 and .metric == 4294967295 and .table == null)'
+check "sysfs routesV6 section is observed, not unsupported (WO-03 M4)" \
+  '.providers[1].sections[] | select(.section == "routesV6") | .outcome.kind == "observed"'
+
 # --- cross-validation against iproute2 in the same namespace -----------------
 ip_gw="$(ip -4 -j route | jq -r '.[] | select(.dst == "default") | .gateway')"
 snap_gw="$(jq -r '.routes[] | select(.family == "ipv4" and .destination.prefixLen == 0) | .gateway' /tmp/live-snapshot.json)"
@@ -65,13 +92,23 @@ jq -e --arg addr "$ip_addr" '.addresses | any(.address == $addr)' /tmp/live-snap
   || fail "address $ip_addr missing from snapshot"
 echo "live-check: PASS — address $ip_addr agrees with iproute2"
 
+# WO-03 cross-validation: the multipath hop set and the v6 route.
+ip_mp="$(ip -j route show 203.0.114.0/24 | jq -r '.[0].nexthops | map(.weight) | join("/")')"
+[ "$ip_mp" = "2/3" ] || fail "iproute2 multipath weights unexpected: '$ip_mp'"
+echo "live-check: PASS — multipath weights agree with iproute2 (2/3)"
+
+ip_v6gw="$(ip -6 -j route show 2001:db8:114::/64 | jq -r '.[0].gateway')"
+snap_v6gw="$(jq -r '.routes[] | select(.destination.address == "2001:db8:114::") | .gateway' /tmp/live-snapshot.json)"
+[ "$ip_v6gw" = "$snap_v6gw" ] || fail "v6 gateway mismatch: iproute2 says '$ip_v6gw', snapshot says '$snap_v6gw'"
+echo "live-check: PASS — IPv6 gateway agrees with iproute2 ($ip_v6gw)"
+
 # --- watch smoke --------------------------------------------------------------
 (timeout 10 "$BIN" watch > /tmp/live-watch.out 2> /tmp/live-watch.err) &
 watch_pid=$!
 sleep 1.5
-ip link add ar-live1 type dummy
+ip link add ar-live2 type dummy
 sleep 1.5
-ip link del ar-live1
+ip link del ar-live2
 wait "$watch_pid" 2>/dev/null || true
 
 grep -q '"event":"snapshot"' /tmp/live-watch.out || fail "watch produced no initial snapshot event"

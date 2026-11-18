@@ -27,12 +27,21 @@ describe('topology goldens (type-sync contract)', () => {
     expect(doc.sourceTimestampMs).toBe(fixtures.workstation.snapshot.timestampMs);
 
     const gateways = doc.nodes.filter((n) => n.nodeKind === 'gateway');
-    expect(gateways.map((g) => g.label).sort()).toEqual(['192.168.1.1', 'fe80::1']);
+    expect(gateways.map((g) => g.label).sort()).toEqual(['192.168.1.1', '198.51.100.1', 'fe80::1']);
 
     // Only evidence-backed edges exist; all gateway edges are observed.
     const gatewayEdges = doc.edges.filter((e) => e.edgeKind.startsWith('gateway'));
-    expect(gatewayEdges.length).toBe(3);
+    expect(gatewayEdges.length).toBe(5);
     expect(gatewayEdges.every((e) => 'observed' in e.evidence)).toBe(true);
+
+    // The multipath route's hops are gateway relationships too (WO-03 M3),
+    // each from its own interface with the kernel weight in the detail.
+    const multipathEdges = gatewayEdges.filter((e) =>
+      e.detail?.includes('multipath next hop'),
+    );
+    expect(multipathEdges.length).toBe(2);
+    expect(multipathEdges.some((e) => e.detail?.includes('weight 1'))).toBe(true);
+    expect(multipathEdges.some((e) => e.detail?.includes('weight 2'))).toBe(true);
 
     // No invented internet/upstream nodes.
     expect(doc.nodes.every((n) => n.nodeKind === 'interface' || n.nodeKind === 'gateway')).toBe(true);

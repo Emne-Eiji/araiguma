@@ -22,8 +22,8 @@ test('topology view renders the projected graph with legend', async ({ page }) =
     return hook ?? null;
   });
   expect(counts).not.toBeNull();
-  expect(counts!.nodeCount).toBe(8); // 6 interfaces + 2 gateways
-  expect(counts!.edgeCount).toBe(3); // three evidenced gateway edges
+  expect(counts!.nodeCount).toBe(9); // 6 interfaces + 3 gateways (incl. the multipath route's)
+  expect(counts!.edgeCount).toBe(5); // three single-path gateway edges + both multipath hops
 
   // Legend explains the semantics, including what is NOT drawn.
   await expect(page.getByText('observed relation')).toBeVisible();

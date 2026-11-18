@@ -45,8 +45,10 @@ fn edges_between(
 fn workstation_topology() {
     let doc = build_topology(&fixture("workstation"));
 
-    // 6 interface nodes + 2 gateway nodes (192.168.1.1 shared by two
-    // defaults, fe80::1 for IPv6). No other node kinds exist.
+    // 6 interface nodes + 3 gateway nodes (192.168.1.1 shared by two
+    // defaults, fe80::1 for the IPv6 default, and 198.51.100.1 reached by
+    // BOTH hops of the multipath route — WO-03 M3). No other node kinds
+    // exist.
     assert_eq!(doc.schema_version, TOPOLOGY_SCHEMA_VERSION);
     assert_eq!(doc.source_timestamp_ms, fixture("workstation").timestamp_ms);
     let interface_nodes = doc
@@ -62,8 +64,8 @@ fn workstation_topology() {
     assert_eq!(interface_nodes, 6, "every interface becomes a node");
     assert_eq!(
         gateway_nodes,
-        2,
-        "exactly two gateways observed: {:?}",
+        3,
+        "exactly three gateways observed: {:?}",
         doc.nodes
             .iter()
             .filter(|n| n.node_kind == NodeKind::Gateway)
@@ -91,6 +93,25 @@ fn workstation_topology() {
         edges_between(&doc, interface(3), gateway("fe80::1")).len(),
         1
     );
+
+    // The multipath route's hops are gateway relationships too (WO-03
+    // M3): each hop (gateway + output interface) draws an edge from its
+    // OWN interface, with the kernel weight recorded in the detail.
+    let mp_gw = gateway("198.51.100.1");
+    let mp_eth0 = edges_between(&doc, interface(2), mp_gw);
+    let mp_wlp = edges_between(&doc, interface(3), mp_gw);
+    assert_eq!(mp_eth0.len(), 1, "one hop reaches the gateway via eth0");
+    assert_eq!(mp_wlp.len(), 1, "the other hop via wlp3s0");
+    assert!(mp_eth0[0]
+        .detail
+        .as_deref()
+        .unwrap()
+        .contains("multipath next hop, kernel weight 1"));
+    assert!(mp_wlp[0]
+        .detail
+        .as_deref()
+        .unwrap()
+        .contains("multipath next hop, kernel weight 2"));
 
     // No bridge members in this scenario: br0 has no ports, so no
     // bridgeMember edges at all.

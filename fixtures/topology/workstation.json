@@ -340,6 +340,37 @@
     {
       "id": {
         "gateway": {
+          "address": "198.51.100.1"
+        }
+      },
+      "label": "198.51.100.1",
+      "nodeKind": "gateway",
+      "interfaceKind": null,
+      "kindDetail": null,
+      "state": "unknown",
+      "annotations": [
+        "gateway observed via a routing-table entry; reachability is not tested — observation only",
+        "anything beyond this gateway (upstream or internet) is not observed"
+      ],
+      "detail": {
+        "ifindex": null,
+        "addresses": [],
+        "macAddress": "notObserved",
+        "mtu": null,
+        "operState": null,
+        "adminState": null,
+        "masterIfindex": null,
+        "parentIfindex": null,
+        "peerIfindex": null,
+        "routesUsing": 0,
+        "defaultRoutes": 0,
+        "sources": [],
+        "notes": []
+      }
+    },
+    {
+      "id": {
+        "gateway": {
           "address": "fe80::1"
         }
       },
@@ -407,6 +438,44 @@
         }
       },
       "detail": "default via this gateway (main table 254)"
+    },
+    {
+      "from": {
+        "interface": {
+          "ifindex": 2
+        }
+      },
+      "to": {
+        "gateway": {
+          "address": "198.51.100.1"
+        }
+      },
+      "edgeKind": "gatewayRoute",
+      "evidence": {
+        "observed": {
+          "source": "netlink"
+        }
+      },
+      "detail": "198.51.100.0/24 (multipath next hop, kernel weight 1) via this gateway (main table 254)"
+    },
+    {
+      "from": {
+        "interface": {
+          "ifindex": 3
+        }
+      },
+      "to": {
+        "gateway": {
+          "address": "198.51.100.1"
+        }
+      },
+      "edgeKind": "gatewayRoute",
+      "evidence": {
+        "observed": {
+          "source": "netlink"
+        }
+      },
+      "detail": "198.51.100.0/24 (multipath next hop, kernel weight 2) via this gateway (main table 254)"
     },
     {
       "from": {
