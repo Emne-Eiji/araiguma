@@ -11,7 +11,7 @@ import workstation from '../../../fixtures/snapshots/workstation.json';
 const validSnapshot = workstation as unknown as NetworkSnapshot;
 
 function snapshotWith(mutate: (doc: Record<string, unknown>) => void): unknown {
-  const doc = structuredClone(validSnapshot) as Record<string, unknown>;
+  const doc = structuredClone(validSnapshot) as unknown as Record<string, unknown>;
   mutate(doc);
   return doc;
 }
