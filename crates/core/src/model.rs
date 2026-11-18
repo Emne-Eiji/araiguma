@@ -359,6 +359,122 @@ pub const RT_TABLE_MAIN: u8 = 254;
 /// The local routing table (RT_TABLE_LOCAL), present in full netlink dumps.
 pub const RT_TABLE_LOCAL: u8 = 255;
 
+/// Observation of an interface's hardware (MAC) address — three states the
+/// presentation must never conflate (WO-02 correction §5):
+///
+/// * [`MacObservation::Present`] — a hardware address was observed.
+/// * [`MacObservation::Absent`] — the interface was **observed to have no
+///   hardware address** (e.g. WireGuard and other `ARPHRD_NONE` devices:
+///   netlink sends no `IFLA_ADDRESS`, sysfs' `address` file is empty).
+/// * [`MacObservation::NotObserved`] — no provider obtained the address
+///   (missing sysfs file, or no provider covered the interface). A
+///   provider that failed wholesale is expressed at the section level,
+///   which this per-field model deliberately does not duplicate.
+///
+/// Serialized as the plain address string when present (byte-identical to
+/// the pre-v2 representation, so existing documents with real addresses
+/// parse unchanged) and as the explicit sentinels `"absent"` /
+/// `"notObserved"` otherwise. A JSON `null` is **rejected**: schema-v1
+/// `null` was ambiguous between "no hardware address" and "not observed",
+/// and ambiguous data is rejected rather than silently assigned a meaning.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub enum MacObservation {
+    /// A normalized `aa:bb:cc:dd:ee:ff` address (lowercase; the kernel may
+    /// expose longer hardware addresses, e.g. 20-byte IPoIB — any number
+    /// of colon-separated hex byte pairs is valid).
+    Present(String),
+    /// Observed: this interface has no hardware address.
+    Absent,
+    /// The hardware address was not observed.
+    #[default]
+    NotObserved,
+}
+
+impl MacObservation {
+    /// Whether a concrete hardware address was observed.
+    pub fn present(&self) -> Option<&str> {
+        match self {
+            MacObservation::Present(address) => Some(address),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for MacObservation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MacObservation::Present(address) => write!(f, "{address}"),
+            MacObservation::Absent => write!(f, "absent"),
+            MacObservation::NotObserved => write!(f, "notObserved"),
+        }
+    }
+}
+
+/// Structural check for a hardware address: one or more pairs of hex
+/// digits separated by single colons (case-insensitive).
+fn is_mac_shaped(value: &str) -> bool {
+    let mut pairs = value.split(':');
+    let mut count = 0usize;
+    for pair in pairs.by_ref() {
+        if pair.len() != 2 || !pair.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return false;
+        }
+        count += 1;
+    }
+    count >= 1
+}
+
+impl Serialize for MacObservation {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for MacObservation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct MacVisitor;
+        impl serde::de::Visitor<'_> for MacVisitor {
+            type Value = MacObservation;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    f,
+                    "a hardware address (\"aa:bb:cc:dd:ee:ff\") or the sentinels \
+                     \"absent\"/\"notObserved\"; JSON null is rejected because schema-v1 \
+                     null could not distinguish an observed absence from a not-observed \
+                     address"
+                )
+            }
+            fn visit_str<E: serde::de::Error>(self, raw: &str) -> Result<Self::Value, E> {
+                match raw {
+                    "absent" => Ok(MacObservation::Absent),
+                    "notObserved" => Ok(MacObservation::NotObserved),
+                    _ => {
+                        if is_mac_shaped(raw) {
+                            // Canonicalize to lowercase so equivalent
+                            // documents compare equal.
+                            Ok(MacObservation::Present(raw.to_ascii_lowercase()))
+                        } else {
+                            Err(E::invalid_value(
+                                serde::de::Unexpected::Str(raw),
+                                &"a hardware address (\"aa:bb:cc:dd:ee:ff\") or the \
+                                 sentinels \"absent\"/\"notObserved\"",
+                            ))
+                        }
+                    }
+                }
+            }
+            fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+                Err(E::custom(
+                    "macAddress must not be null: schema-v1 null was ambiguous between \
+                     \"observed no hardware address\" and \"not observed\"; use the \
+                     sentinels \"absent\"/\"notObserved\" (schema v2)",
+                ))
+            }
+        }
+        deserializer.deserialize_str(MacVisitor)
+    }
+}
+
 /// An observed network interface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -373,9 +489,9 @@ pub struct Interface {
     pub oper_state: Option<OperState>,
     /// Administrative state (IFF_UP); `None` = not observed.
     pub admin_state: Option<AdminState>,
-    /// MAC address (normalized `aa:bb:cc:dd:ee:ff`); `None` = not observed
-    /// or the interface has none (e.g. wireguard).
-    pub mac_address: Option<String>,
+    /// Hardware (MAC) address; see [`MacObservation`] for the three
+    /// observed states (schema v2 — v1's ambiguous `null` is rejected).
+    pub mac_address: MacObservation,
     pub mtu: Option<u32>,
     pub tx_queue_len: Option<u32>,
     /// Bridge/bond master ifindex (netlink `IFLA_MASTER`, sysfs `master`).

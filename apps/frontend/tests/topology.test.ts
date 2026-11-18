@@ -23,7 +23,7 @@ describe('topology goldens (type-sync contract)', () => {
 
   it('workstation golden matches the design invariants', () => {
     const doc = defaultTopology();
-    expect(doc.schemaVersion).toBe(1);
+    expect(doc.schemaVersion).toBe(2);
     expect(doc.sourceTimestampMs).toBe(fixtures.workstation.snapshot.timestampMs);
 
     const gateways = doc.nodes.filter((n) => n.nodeKind === 'gateway');
@@ -74,16 +74,35 @@ describe('parseTopology rejects invalid input', () => {
   it('rejects non-objects and wrong schema versions', () => {
     expect(() => parseTopology(null)).toThrow();
     expect(() => parseTopology([])).toThrow();
-    expect(() => parseTopology({ schemaVersion: 2, nodes: [], edges: [] })).toThrow(/schemaVersion/);
+    expect(() => parseTopology({ schemaVersion: 3, nodes: [], edges: [] })).toThrow(/schemaVersion/);
   });
 
   it('rejects nodes without ids or labels', () => {
     expect(() =>
-      parseTopology({ schemaVersion: 1, nodes: [{ label: 'x', nodeKind: 'interface' }], edges: [] }),
+      parseTopology({ schemaVersion: 2, nodes: [{ label: 'x', nodeKind: 'interface' }], edges: [] }),
     ).toThrow(/id/);
     expect(() =>
-      parseTopology({ schemaVersion: 1, nodes: [{ id: { interface: { ifindex: 1 } }, label: '', nodeKind: 'interface' }], edges: [] }),
+      parseTopology({ schemaVersion: 2, nodes: [{ id: { interface: { ifindex: 1 } }, label: '', nodeKind: 'interface' }], edges: [] }),
     ).toThrow(/label/);
+  });
+
+  it('rejects null macAddress in node details with the ambiguity reason', () => {
+    const node = (macAddress: unknown) => ({
+      id: { interface: { ifindex: 1 } },
+      label: 'eth0',
+      nodeKind: 'interface',
+      detail: { macAddress },
+    });
+    expect(() =>
+      parseTopology({ schemaVersion: 2, nodes: [node('52:54:00:12:34:56')], edges: [] }),
+    ).not.toThrow();
+    expect(() => parseTopology({ schemaVersion: 2, nodes: [node('absent')], edges: [] })).not.toThrow();
+    expect(() => parseTopology({ schemaVersion: 2, nodes: [node(null)], edges: [] })).toThrow(
+      /ambiguous/,
+    );
+    expect(() => parseTopology({ schemaVersion: 2, nodes: [node('zzz')], edges: [] })).toThrow(
+      /hardware address|sentinels/,
+    );
   });
 });
 

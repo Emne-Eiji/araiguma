@@ -152,6 +152,13 @@ pub fn render_topology(document: &TopologyDocument, pretty: bool) -> String {
 
 /// Load a snapshot from a file (or stdin when `input` is None) and project
 /// it. Read-only; never observes the live system.
+///
+/// Schema policy (WO-02 correction §5): current documents are v2
+/// (three-state `macAddress`). v1 documents are accepted **only when
+/// unambiguous** — every `macAddress` must be a non-null string; a v1
+/// `null` cannot distinguish "observed no hardware address" from "not
+/// observed" and is rejected with an explanation instead of being silently
+/// assigned a meaning. Unknown versions are rejected.
 pub fn project_snapshot_to_topology(input: Option<&str>) -> Result<TopologyDocument, String> {
     let raw = match input {
         Some(path) => {
@@ -165,7 +172,41 @@ pub fn project_snapshot_to_topology(input: Option<&str>) -> Result<TopologyDocum
             buffer
         }
     };
-    let snapshot: NetworkSnapshot = serde_json::from_str(&raw)
+    let value: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|error| format!("invalid JSON: {error}"))?;
+    let version = value
+        .get("schemaVersion")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| {
+            "invalid snapshot document: schemaVersion must be a non-negative integer".to_string()
+        })?;
+    match version {
+        v if v == u64::from(araiguma_core::snapshot::SNAPSHOT_SCHEMA_VERSION) => {}
+        1 => {
+            // v1 is acceptable only where its macAddress fields are
+            // unambiguous (non-null). A null fails with a clear reason.
+            if let Some(interfaces) = value.get("interfaces").and_then(|v| v.as_array()) {
+                for (index, iface) in interfaces.iter().enumerate() {
+                    if iface.get("macAddress").is_some_and(|m| m.is_null()) {
+                        return Err(format!(
+                            "invalid snapshot at $.interfaces[{index}].macAddress: null is \
+                             ambiguous in schema v1 (it could mean either \"observed no hardware \
+                             address\" or \"not observed\"); re-export the document with the \
+                             current araiguma CLI, which writes unambiguous v2 documents"
+                        ));
+                    }
+                }
+            }
+        }
+        other => {
+            return Err(format!(
+                "unsupported snapshot schemaVersion {other} (this build reads \
+                 {SNAPSHOT_VERSION} documents)",
+                SNAPSHOT_VERSION = araiguma_core::snapshot::SNAPSHOT_SCHEMA_VERSION
+            ))
+        }
+    }
+    let snapshot: NetworkSnapshot = serde_json::from_value(value)
         .map_err(|error| format!("invalid snapshot document: {error}"))?;
     Ok(build_topology(&snapshot))
 }
@@ -279,7 +320,7 @@ mod tests {
     #[test]
     fn snapshot_envelope_shape() {
         let snapshot = NetworkSnapshot {
-            schema_version: 1,
+            schema_version: araiguma_core::snapshot::SNAPSHOT_SCHEMA_VERSION,
             timestamp_ms: 42,
             interfaces: vec![],
             addresses: vec![],
@@ -288,7 +329,10 @@ mod tests {
         };
         let value: serde_json::Value = serde_json::from_str(&snapshot_envelope(&snapshot)).unwrap();
         assert_eq!(value["event"], "snapshot");
-        assert_eq!(value["snapshot"]["schemaVersion"], 1);
+        assert_eq!(
+            value["snapshot"]["schemaVersion"],
+            serde_json::json!(araiguma_core::snapshot::SNAPSHOT_SCHEMA_VERSION)
+        );
         assert_eq!(value["snapshot"]["timestampMs"], 42);
     }
 
@@ -307,7 +351,7 @@ mod tests {
     #[test]
     fn resynchronized_envelope_includes_full_snapshot() {
         let snapshot = NetworkSnapshot {
-            schema_version: 1,
+            schema_version: araiguma_core::snapshot::SNAPSHOT_SCHEMA_VERSION,
             timestamp_ms: 43,
             interfaces: vec![],
             addresses: vec![],

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "timestampMs": 1765824003000,
   "interfaces": [
     {
@@ -14,7 +14,10 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["netlink", "sysfs"],
+      "sources": [
+        "netlink",
+        "sysfs"
+      ],
       "notes": []
     },
     {
@@ -29,7 +32,10 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["netlink", "sysfs"],
+      "sources": [
+        "netlink",
+        "sysfs"
+      ],
       "notes": []
     },
     {
@@ -44,7 +50,9 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": 2,
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
@@ -59,7 +67,10 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["netlink", "sysfs"],
+      "sources": [
+        "netlink",
+        "sysfs"
+      ],
       "notes": []
     },
     {
@@ -74,7 +85,10 @@
       "txQueueLen": 1000,
       "masterIfindex": 4,
       "parentIfindex": null,
-      "sources": ["netlink", "sysfs"],
+      "sources": [
+        "netlink",
+        "sysfs"
+      ],
       "notes": []
     },
     {
@@ -89,7 +103,9 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
@@ -104,7 +120,9 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
@@ -119,7 +137,10 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["netlink", "sysfs"],
+      "sources": [
+        "netlink",
+        "sysfs"
+      ],
       "notes": []
     }
   ],
@@ -130,9 +151,13 @@
       "address": "127.0.0.1",
       "prefixLen": 8,
       "scope": "host",
-      "flags": ["permanent"],
+      "flags": [
+        "permanent"
+      ],
       "label": null,
-      "sources": ["netlink"]
+      "sources": [
+        "netlink"
+      ]
     },
     {
       "ifindex": 2,
@@ -142,7 +167,9 @@
       "scope": "global",
       "flags": null,
       "label": null,
-      "sources": ["netlink"]
+      "sources": [
+        "netlink"
+      ]
     },
     {
       "ifindex": 2,
@@ -150,9 +177,14 @@
       "address": "fe80::5054:ff:fe11:2233",
       "prefixLen": 64,
       "scope": "link",
-      "flags": ["permanent"],
+      "flags": [
+        "permanent"
+      ],
       "label": null,
-      "sources": ["netlink", "procfs"]
+      "sources": [
+        "netlink",
+        "procfs"
+      ]
     },
     {
       "ifindex": 3,
@@ -162,7 +194,9 @@
       "scope": "global",
       "flags": null,
       "label": null,
-      "sources": ["netlink"]
+      "sources": [
+        "netlink"
+      ]
     },
     {
       "ifindex": 4,
@@ -172,7 +206,9 @@
       "scope": "global",
       "flags": null,
       "label": null,
-      "sources": ["netlink"]
+      "sources": [
+        "netlink"
+      ]
     },
     {
       "ifindex": 5,
@@ -182,7 +218,9 @@
       "scope": "global",
       "flags": null,
       "label": null,
-      "sources": ["netlink"]
+      "sources": [
+        "netlink"
+      ]
     },
     {
       "ifindex": 6,
@@ -192,7 +230,9 @@
       "scope": "global",
       "flags": null,
       "label": null,
-      "sources": ["netlink"]
+      "sources": [
+        "netlink"
+      ]
     },
     {
       "ifindex": 7,
@@ -202,13 +242,18 @@
       "scope": "global",
       "flags": null,
       "label": null,
-      "sources": ["netlink"]
+      "sources": [
+        "netlink"
+      ]
     }
   ],
   "routes": [
     {
       "family": "ipv4",
-      "destination": { "address": "0.0.0.0", "prefixLen": 0 },
+      "destination": {
+        "address": "0.0.0.0",
+        "prefixLen": 0
+      },
       "gateway": "192.168.1.1",
       "outputInterface": 2,
       "outputInterfaceName": "eth0",
@@ -218,12 +263,17 @@
       "metric": 100,
       "table": 254,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv4",
-      "destination": { "address": "192.168.1.0", "prefixLen": 24 },
+      "destination": {
+        "address": "192.168.1.0",
+        "prefixLen": 24
+      },
       "gateway": null,
       "outputInterface": 2,
       "outputInterfaceName": "eth0",
@@ -233,12 +283,17 @@
       "metric": 0,
       "table": 254,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv4",
-      "destination": { "address": "10.100.0.0", "prefixLen": 24 },
+      "destination": {
+        "address": "10.100.0.0",
+        "prefixLen": 24
+      },
       "gateway": null,
       "outputInterface": 3,
       "outputInterfaceName": "eth0.100",
@@ -248,12 +303,17 @@
       "metric": 0,
       "table": 254,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv4",
-      "destination": { "address": "172.16.0.0", "prefixLen": 24 },
+      "destination": {
+        "address": "172.16.0.0",
+        "prefixLen": 24
+      },
       "gateway": null,
       "outputInterface": 4,
       "outputInterfaceName": "br0",
@@ -263,12 +323,17 @@
       "metric": 0,
       "table": 254,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv4",
-      "destination": { "address": "10.1.1.0", "prefixLen": 24 },
+      "destination": {
+        "address": "10.1.1.0",
+        "prefixLen": 24
+      },
       "gateway": null,
       "outputInterface": 6,
       "outputInterfaceName": "veth0",
@@ -278,7 +343,9 @@
       "metric": 0,
       "table": 254,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     }
   ],
@@ -287,11 +354,41 @@
       "provider": "netlink",
       "state": "available",
       "sections": [
-        { "section": "interfaces", "outcome": { "kind": "observed", "count": 8 } },
-        { "section": "addressesV4", "outcome": { "kind": "observed", "count": 7 } },
-        { "section": "addressesV6", "outcome": { "kind": "observed", "count": 1 } },
-        { "section": "routesV4", "outcome": { "kind": "observed", "count": 5 } },
-        { "section": "routesV6", "outcome": { "kind": "observed", "count": 0 } }
+        {
+          "section": "interfaces",
+          "outcome": {
+            "kind": "observed",
+            "count": 8
+          }
+        },
+        {
+          "section": "addressesV4",
+          "outcome": {
+            "kind": "observed",
+            "count": 7
+          }
+        },
+        {
+          "section": "addressesV6",
+          "outcome": {
+            "kind": "observed",
+            "count": 1
+          }
+        },
+        {
+          "section": "routesV4",
+          "outcome": {
+            "kind": "observed",
+            "count": 5
+          }
+        },
+        {
+          "section": "routesV6",
+          "outcome": {
+            "kind": "observed",
+            "count": 0
+          }
+        }
       ],
       "notes": []
     },
@@ -299,11 +396,39 @@
       "provider": "sysfs",
       "state": "degraded",
       "sections": [
-        { "section": "interfaces", "outcome": { "kind": "observed", "count": 8 } },
-        { "section": "addressesV4", "outcome": { "kind": "unsupported" } },
-        { "section": "addressesV6", "outcome": { "kind": "observed", "count": 1 } },
-        { "section": "routesV4", "outcome": { "kind": "observed", "count": 5 } },
-        { "section": "routesV6", "outcome": { "kind": "unsupported" } }
+        {
+          "section": "interfaces",
+          "outcome": {
+            "kind": "observed",
+            "count": 8
+          }
+        },
+        {
+          "section": "addressesV4",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "addressesV6",
+          "outcome": {
+            "kind": "observed",
+            "count": 1
+          }
+        },
+        {
+          "section": "routesV4",
+          "outcome": {
+            "kind": "observed",
+            "count": 5
+          }
+        },
+        {
+          "section": "routesV6",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        }
       ],
       "notes": [
         "sysfs cannot distinguish dummy, veth, vlan and similar virtual interfaces from Ethernet (same ARPHRD type); netlink classification takes priority",

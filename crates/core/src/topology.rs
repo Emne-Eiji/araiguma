@@ -26,12 +26,20 @@ use std::net::IpAddr;
 use serde::{Deserialize, Serialize};
 
 use crate::model::{
-    Address, AdminState, Interface, InterfaceKind, IpNet, ObservationSource, OperState, Route,
-    RT_TABLE_MAIN,
+    Address, AdminState, Interface, InterfaceKind, IpNet, MacObservation, ObservationSource,
+    OperState, Route, RT_TABLE_MAIN,
 };
 use crate::snapshot::NetworkSnapshot;
 
-pub const TOPOLOGY_SCHEMA_VERSION: u32 = 1;
+/// Current topology document schema revision.
+///
+/// * **v2** (WO-02 correction): `macAddress` in node details became the
+///   three-state [`MacObservation`] string representation (address /
+///   `"absent"` / `"notObserved"`); edge kinds gained `bondMember` and
+///   `masterMember` (a master relationship's flavor comes from the
+///   master's own kind observation, never an assumption).
+/// * v1: everything else, as originally defined.
+pub const TOPOLOGY_SCHEMA_VERSION: u32 = 2;
 
 /// Identifies a topology node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -104,7 +112,9 @@ pub enum Evidence {
 pub struct NodeDetail {
     pub ifindex: Option<u32>,
     pub addresses: Vec<Address>,
-    pub mac_address: Option<String>,
+    /// Hardware address observation (three states; see
+    /// [`crate::model::MacObservation`]).
+    pub mac_address: MacObservation,
     pub mtu: Option<u32>,
     pub oper_state: Option<OperState>,
     pub admin_state: Option<AdminState>,

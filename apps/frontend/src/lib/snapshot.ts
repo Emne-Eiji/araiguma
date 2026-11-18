@@ -10,6 +10,7 @@ import type {
   ProviderId,
   ProviderState,
 } from '../types';
+import { isMacObservation } from './format';
 
 const INTERFACE_KINDS: readonly string[] = [
   'loopback',
@@ -70,8 +71,12 @@ function asEnum<T extends string>(
 
 export function parseSnapshot(input: unknown): NetworkSnapshot {
   const root = asRecord(input, '$');
-  if (root.schemaVersion !== 1) {
-    fail('$.schemaVersion', `unsupported schema version ${String(root.schemaVersion)} (expected 1)`);
+  const schema = root.schemaVersion;
+  if (schema !== 1 && schema !== 2) {
+    fail(
+      '$.schemaVersion',
+      `unsupported schema version ${String(schema)} (expected 1 or 2; this build writes v2)`,
+    );
   }
   if (typeof root.timestampMs !== 'number') {
     fail('$.timestampMs', 'expected a number');
@@ -86,6 +91,22 @@ export function parseSnapshot(input: unknown): NetworkSnapshot {
       fail(`$.interfaces[${i}].ifindex`, 'expected a number');
     }
     asEnum<InterfaceKind>(iface.kind, INTERFACE_KINDS as never, `$.interfaces[${i}].kind`);
+    // MAC observation (schema v2): a hardware-address string or the
+    // sentinels 'absent' / 'notObserved'. JSON null is rejected with an
+    // explanation: v1 null was ambiguous between "observed no hardware
+    // address" and "not observed", and ambiguous data is rejected rather
+    // than silently assigned a meaning.
+    if (iface.macAddress === null || iface.macAddress === undefined) {
+      fail(
+        `$.interfaces[${i}].macAddress`,
+        'must not be null/absent — v1 null was ambiguous between "observed no hardware address" and "not observed"; use the sentinels \'absent\' / \'notObserved\' (schema v2)',
+      );
+    } else if (!isMacObservation(iface.macAddress)) {
+      fail(
+        `$.interfaces[${i}].macAddress`,
+        `expected a hardware address ("aa:bb:cc:dd:ee:ff") or the sentinels 'absent'/'notObserved', got ${JSON.stringify(iface.macAddress)}`,
+      );
+    }
     return iface;
   });
 
@@ -117,9 +138,11 @@ export function parseSnapshot(input: unknown): NetworkSnapshot {
 
   // The per-item shape is validated above at its discriminant fields; the
   // final cast goes through unknown because the validated records are
-  // structurally wider than the target types.
+  // structurally wider than the target types. (v1 documents that pass the
+  // macAddress check above are unambiguous and accepted with v2
+  // semantics.)
   return {
-    schemaVersion: 1,
+    schemaVersion: root.schemaVersion as number,
     timestampMs: root.timestampMs,
     interfaces,
     addresses,

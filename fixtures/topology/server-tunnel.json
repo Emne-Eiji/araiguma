@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "sourceTimestampMs": 1765824002000,
   "nodes": [
     {
@@ -139,7 +139,7 @@
             ]
           }
         ],
-        "macAddress": null,
+        "macAddress": "absent",
         "mtu": 1400,
         "operState": "unknown",
         "adminState": "up",
@@ -171,7 +171,7 @@
       "detail": {
         "ifindex": null,
         "addresses": [],
-        "macAddress": null,
+        "macAddress": "notObserved",
         "mtu": null,
         "operState": null,
         "adminState": null,

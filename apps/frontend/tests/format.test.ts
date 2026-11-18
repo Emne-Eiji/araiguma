@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   formatGateway,
   formatIpNet,
+  formatMacObservation,
   formatMissing,
   formatProtocol,
   interfaceStateChip,
+  isMacObservation,
   kindLabel,
+  macObservationKind,
   providerStateLabel,
   summarizeAddresses,
 } from '../src/lib/format';
@@ -19,7 +22,7 @@ function iface(overrides: Partial<Interface>): Interface {
     kindDetail: null,
     operState: null,
     adminState: null,
-    macAddress: null,
+    macAddress: 'notObserved',
     mtu: null,
     txQueueLen: null,
     masterIfindex: null,
@@ -131,5 +134,34 @@ describe('summarizeAddresses', () => {
     );
     expect(shown.map((a) => a.address)).toEqual(['192.168.1.42', 'fd00::1']);
     expect(more).toBe(2);
+  });
+});
+
+describe('MAC observation semantics (schema v2)', () => {
+  it('distinguishes present, absent, and not observed', () => {
+    expect(macObservationKind('52:54:00:12:34:56')).toBe('present');
+    expect(macObservationKind('absent')).toBe('absent');
+    expect(macObservationKind('notObserved')).toBe('notObserved');
+  });
+
+  it('formats the three states without conflating them', () => {
+    expect(formatMacObservation('52:54:00:12:34:56')).toBe('52:54:00:12:34:56');
+    expect(formatMacObservation('absent')).toBe('no hardware address (observed)');
+    expect(formatMacObservation('notObserved')).toBe('not observed');
+  });
+
+  it('validates hardware-address shapes and rejects ambiguity', () => {
+    expect(isMacObservation('aa:bb:cc:dd:ee:ff')).toBe(true);
+    // 20-byte IPoIB-style addresses are valid hardware addresses.
+    expect(isMacObservation('00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00:11:22:33')).toBe(
+      true,
+    );
+    expect(isMacObservation('absent')).toBe(true);
+    expect(isMacObservation('notObserved')).toBe(true);
+    // Malformed or ambiguous values are rejected.
+    expect(isMacObservation('zzz')).toBe(false);
+    expect(isMacObservation('aa-bb-cc-dd-ee-ff')).toBe(false);
+    expect(isMacObservation('')).toBe(false);
+    expect(isMacObservation(null)).toBe(false);
   });
 });

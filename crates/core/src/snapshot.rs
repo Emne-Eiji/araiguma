@@ -9,11 +9,22 @@ use serde::{Deserialize, Serialize};
 use crate::model::{Address, AddressFamily, Interface, Route};
 use crate::provider::ProviderReport;
 
+/// Current snapshot schema revision.
+///
+/// * **v2** (WO-02 correction §5): `macAddress` became the three-state
+///   [`crate::model::MacObservation`] — the plain address string (present,
+///   identical to v1), or the sentinels `"absent"` (observed to have no
+///   hardware address) / `"notObserved"`. v1's ambiguous `null` is
+///   rejected on read.
+/// * v1: everything else, as originally defined.
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 2;
+
 /// One merged observation of the local network environment.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkSnapshot {
-    /// Model schema revision; bump on breaking JSON changes.
+    /// Model schema revision; bump on breaking JSON changes. See
+    /// [`SNAPSHOT_SCHEMA_VERSION`].
     pub schema_version: u32,
     /// Unix epoch milliseconds of the observation run.
     pub timestamp_ms: u64,

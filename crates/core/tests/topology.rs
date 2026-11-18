@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use araiguma_core::model::ObservationSource;
 use araiguma_core::topology::{
     build_topology, EdgeKind, Evidence, NodeId, NodeKind, NodeState, TopologyDocument,
+    TOPOLOGY_SCHEMA_VERSION,
 };
 use araiguma_core::NetworkSnapshot;
 
@@ -46,7 +47,7 @@ fn workstation_topology() {
 
     // 6 interface nodes + 2 gateway nodes (192.168.1.1 shared by two
     // defaults, fe80::1 for IPv6). No other node kinds exist.
-    assert_eq!(doc.schema_version, 1);
+    assert_eq!(doc.schema_version, TOPOLOGY_SCHEMA_VERSION);
     assert_eq!(doc.source_timestamp_ms, fixture("workstation").timestamp_ms);
     let interface_nodes = doc
         .nodes
@@ -218,7 +219,7 @@ fn empty_snapshot_projects_to_empty_topology() {
     let doc = build_topology(&fixture("empty"));
     assert!(doc.nodes.is_empty());
     assert!(doc.edges.is_empty());
-    assert_eq!(doc.schema_version, 1);
+    assert_eq!(doc.schema_version, TOPOLOGY_SCHEMA_VERSION);
 }
 
 #[test]
@@ -294,8 +295,8 @@ fn gateway_without_oif_is_inferred_only_when_unambiguous() {
 // --- small builders -------------------------------------------------------
 
 use araiguma_core::model::{
-    Address, AddressFamily, AddressScope, AdminState, Interface, InterfaceKind, IpNet, OperState,
-    Route, RouteProtocol, RouteScope, RouteType,
+    Address, AddressFamily, AddressScope, AdminState, Interface, InterfaceKind, IpNet,
+    MacObservation, OperState, Route, RouteProtocol, RouteScope, RouteType,
 };
 
 #[test]
@@ -472,7 +473,7 @@ fn interface_fixture(ifindex: u32, name: &str, kind: &str) -> Interface {
         kind_detail: None,
         oper_state: Some(OperState::Up),
         admin_state: Some(AdminState::Up),
-        mac_address: None,
+        mac_address: MacObservation::NotObserved,
         mtu: Some(1500),
         tx_queue_len: None,
         master_ifindex: None,

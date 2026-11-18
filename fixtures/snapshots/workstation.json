@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "timestampMs": 1765824000000,
   "interfaces": [
     {
@@ -14,7 +14,10 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["netlink", "sysfs"],
+      "sources": [
+        "netlink",
+        "sysfs"
+      ],
       "notes": []
     },
     {
@@ -29,7 +32,10 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["netlink", "sysfs"],
+      "sources": [
+        "netlink",
+        "sysfs"
+      ],
       "notes": []
     },
     {
@@ -44,7 +50,10 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["netlink", "sysfs"],
+      "sources": [
+        "netlink",
+        "sysfs"
+      ],
       "notes": []
     },
     {
@@ -59,7 +68,10 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["netlink", "sysfs"],
+      "sources": [
+        "netlink",
+        "sysfs"
+      ],
       "notes": []
     },
     {
@@ -69,12 +81,15 @@
       "kindDetail": "wireguard",
       "operState": "unknown",
       "adminState": "up",
-      "macAddress": null,
+      "macAddress": "absent",
       "mtu": 1420,
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["netlink", "sysfs"],
+      "sources": [
+        "netlink",
+        "sysfs"
+      ],
       "notes": []
     },
     {
@@ -89,7 +104,10 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["netlink", "sysfs"],
+      "sources": [
+        "netlink",
+        "sysfs"
+      ],
       "notes": []
     }
   ],
@@ -100,9 +118,13 @@
       "address": "127.0.0.1",
       "prefixLen": 8,
       "scope": "host",
-      "flags": ["permanent"],
+      "flags": [
+        "permanent"
+      ],
       "label": null,
-      "sources": ["netlink"]
+      "sources": [
+        "netlink"
+      ]
     },
     {
       "ifindex": 1,
@@ -110,9 +132,14 @@
       "address": "::1",
       "prefixLen": 128,
       "scope": "host",
-      "flags": ["permanent"],
+      "flags": [
+        "permanent"
+      ],
       "label": null,
-      "sources": ["netlink", "procfs"]
+      "sources": [
+        "netlink",
+        "procfs"
+      ]
     },
     {
       "ifindex": 2,
@@ -122,7 +149,9 @@
       "scope": "global",
       "flags": null,
       "label": null,
-      "sources": ["netlink"]
+      "sources": [
+        "netlink"
+      ]
     },
     {
       "ifindex": 2,
@@ -130,9 +159,14 @@
       "address": "fe80::5054:ff:fe12:3456",
       "prefixLen": 64,
       "scope": "link",
-      "flags": ["permanent"],
+      "flags": [
+        "permanent"
+      ],
       "label": null,
-      "sources": ["netlink", "procfs"]
+      "sources": [
+        "netlink",
+        "procfs"
+      ]
     },
     {
       "ifindex": 3,
@@ -142,7 +176,9 @@
       "scope": "global",
       "flags": null,
       "label": null,
-      "sources": ["netlink"]
+      "sources": [
+        "netlink"
+      ]
     },
     {
       "ifindex": 3,
@@ -150,9 +186,14 @@
       "address": "fe80::a288:b4ff:fe22:3344",
       "prefixLen": 64,
       "scope": "link",
-      "flags": ["permanent"],
+      "flags": [
+        "permanent"
+      ],
       "label": null,
-      "sources": ["netlink", "procfs"]
+      "sources": [
+        "netlink",
+        "procfs"
+      ]
     },
     {
       "ifindex": 10,
@@ -162,7 +203,9 @@
       "scope": "global",
       "flags": null,
       "label": null,
-      "sources": ["netlink"]
+      "sources": [
+        "netlink"
+      ]
     },
     {
       "ifindex": 11,
@@ -172,13 +215,18 @@
       "scope": "global",
       "flags": null,
       "label": null,
-      "sources": ["netlink"]
+      "sources": [
+        "netlink"
+      ]
     }
   ],
   "routes": [
     {
       "family": "ipv4",
-      "destination": { "address": "0.0.0.0", "prefixLen": 0 },
+      "destination": {
+        "address": "0.0.0.0",
+        "prefixLen": 0
+      },
       "gateway": "192.168.1.1",
       "outputInterface": 2,
       "outputInterfaceName": "eth0",
@@ -188,12 +236,17 @@
       "metric": 100,
       "table": 254,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv4",
-      "destination": { "address": "0.0.0.0", "prefixLen": 0 },
+      "destination": {
+        "address": "0.0.0.0",
+        "prefixLen": 0
+      },
       "gateway": "192.168.1.1",
       "outputInterface": 3,
       "outputInterfaceName": "wlp3s0",
@@ -203,12 +256,17 @@
       "metric": 600,
       "table": 254,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv4",
-      "destination": { "address": "192.168.1.0", "prefixLen": 24 },
+      "destination": {
+        "address": "192.168.1.0",
+        "prefixLen": 24
+      },
       "gateway": null,
       "outputInterface": 2,
       "outputInterfaceName": "eth0",
@@ -218,12 +276,17 @@
       "metric": 100,
       "table": 254,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv4",
-      "destination": { "address": "192.168.1.0", "prefixLen": 24 },
+      "destination": {
+        "address": "192.168.1.0",
+        "prefixLen": 24
+      },
       "gateway": null,
       "outputInterface": 3,
       "outputInterfaceName": "wlp3s0",
@@ -233,12 +296,17 @@
       "metric": 600,
       "table": 254,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv4",
-      "destination": { "address": "10.10.0.0", "prefixLen": 24 },
+      "destination": {
+        "address": "10.10.0.0",
+        "prefixLen": 24
+      },
       "gateway": null,
       "outputInterface": 10,
       "outputInterfaceName": "wg0",
@@ -248,12 +316,17 @@
       "metric": 0,
       "table": 254,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv4",
-      "destination": { "address": "198.51.100.0", "prefixLen": 24 },
+      "destination": {
+        "address": "198.51.100.0",
+        "prefixLen": 24
+      },
       "gateway": null,
       "outputInterface": 11,
       "outputInterfaceName": "dummy0",
@@ -263,12 +336,17 @@
       "metric": 0,
       "table": 254,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv4",
-      "destination": { "address": "127.0.0.0", "prefixLen": 8 },
+      "destination": {
+        "address": "127.0.0.0",
+        "prefixLen": 8
+      },
       "gateway": null,
       "outputInterface": 1,
       "outputInterfaceName": "lo",
@@ -278,12 +356,17 @@
       "metric": 0,
       "table": 255,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv4",
-      "destination": { "address": "127.0.0.1", "prefixLen": 32 },
+      "destination": {
+        "address": "127.0.0.1",
+        "prefixLen": 32
+      },
       "gateway": null,
       "outputInterface": 1,
       "outputInterfaceName": "lo",
@@ -293,12 +376,17 @@
       "metric": 0,
       "table": 255,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv4",
-      "destination": { "address": "192.168.1.42", "prefixLen": 32 },
+      "destination": {
+        "address": "192.168.1.42",
+        "prefixLen": 32
+      },
       "gateway": null,
       "outputInterface": 2,
       "outputInterfaceName": "eth0",
@@ -308,12 +396,17 @@
       "metric": 0,
       "table": 255,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv6",
-      "destination": { "address": "::", "prefixLen": 0 },
+      "destination": {
+        "address": "::",
+        "prefixLen": 0
+      },
       "gateway": "fe80::1",
       "outputInterface": 3,
       "outputInterfaceName": "wlp3s0",
@@ -323,12 +416,17 @@
       "metric": 1024,
       "table": 254,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv6",
-      "destination": { "address": "fe80::", "prefixLen": 64 },
+      "destination": {
+        "address": "fe80::",
+        "prefixLen": 64
+      },
       "gateway": null,
       "outputInterface": 2,
       "outputInterfaceName": "eth0",
@@ -338,12 +436,17 @@
       "metric": 0,
       "table": 254,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     },
     {
       "family": "ipv6",
-      "destination": { "address": "::1", "prefixLen": 128 },
+      "destination": {
+        "address": "::1",
+        "prefixLen": 128
+      },
       "gateway": null,
       "outputInterface": 1,
       "outputInterfaceName": "lo",
@@ -353,7 +456,9 @@
       "metric": 0,
       "table": 255,
       "flags": [],
-      "sources": ["netlink"],
+      "sources": [
+        "netlink"
+      ],
       "notes": []
     }
   ],
@@ -362,11 +467,41 @@
       "provider": "netlink",
       "state": "available",
       "sections": [
-        { "section": "interfaces", "outcome": { "kind": "observed", "count": 6 } },
-        { "section": "addressesV4", "outcome": { "kind": "observed", "count": 5 } },
-        { "section": "addressesV6", "outcome": { "kind": "observed", "count": 3 } },
-        { "section": "routesV4", "outcome": { "kind": "observed", "count": 9 } },
-        { "section": "routesV6", "outcome": { "kind": "observed", "count": 3 } }
+        {
+          "section": "interfaces",
+          "outcome": {
+            "kind": "observed",
+            "count": 6
+          }
+        },
+        {
+          "section": "addressesV4",
+          "outcome": {
+            "kind": "observed",
+            "count": 5
+          }
+        },
+        {
+          "section": "addressesV6",
+          "outcome": {
+            "kind": "observed",
+            "count": 3
+          }
+        },
+        {
+          "section": "routesV4",
+          "outcome": {
+            "kind": "observed",
+            "count": 9
+          }
+        },
+        {
+          "section": "routesV6",
+          "outcome": {
+            "kind": "observed",
+            "count": 3
+          }
+        }
       ],
       "notes": []
     },
@@ -374,11 +509,39 @@
       "provider": "sysfs",
       "state": "degraded",
       "sections": [
-        { "section": "interfaces", "outcome": { "kind": "observed", "count": 6 } },
-        { "section": "addressesV4", "outcome": { "kind": "unsupported" } },
-        { "section": "addressesV6", "outcome": { "kind": "observed", "count": 3 } },
-        { "section": "routesV4", "outcome": { "kind": "observed", "count": 6 } },
-        { "section": "routesV6", "outcome": { "kind": "unsupported" } }
+        {
+          "section": "interfaces",
+          "outcome": {
+            "kind": "observed",
+            "count": 6
+          }
+        },
+        {
+          "section": "addressesV4",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "addressesV6",
+          "outcome": {
+            "kind": "observed",
+            "count": 3
+          }
+        },
+        {
+          "section": "routesV4",
+          "outcome": {
+            "kind": "observed",
+            "count": 6
+          }
+        },
+        {
+          "section": "routesV6",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        }
       ],
       "notes": [
         "sysfs cannot distinguish dummy, veth, vlan and similar virtual interfaces from Ethernet (same ARPHRD type); netlink classification takes priority",

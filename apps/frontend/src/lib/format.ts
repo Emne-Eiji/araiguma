@@ -7,6 +7,8 @@ import type {
   Interface,
   InterfaceKind,
   IpNet,
+  MacObservation,
+  MacObservationKind,
   ProviderState,
   RouteProtocol,
 } from '../types';
@@ -41,6 +43,34 @@ export function interfaceStateChip(iface: Interface): StateChip {
     default:
       // unknown, notPresent, lowerLayerDown, or not observed
       return { label: 'unknown state', tone: 'unknown' };
+  }
+}
+
+// The three MAC observation states are distinct facts and must stay
+// distinguishable everywhere the value is displayed.
+const MAC_PATTERN = /^(?:[0-9a-f]{2}:)+[0-9a-f]{2}$/i;
+
+export function macObservationKind(value: MacObservation): MacObservationKind {
+  if (value === 'absent') return 'absent';
+  if (value === 'notObserved') return 'notObserved';
+  return 'present';
+}
+
+export function isMacObservation(value: unknown): value is MacObservation {
+  return (
+    typeof value === 'string' &&
+    (value === 'absent' || value === 'notObserved' || MAC_PATTERN.test(value))
+  );
+}
+
+export function formatMacObservation(value: MacObservation): string {
+  switch (macObservationKind(value)) {
+    case 'present':
+      return value;
+    case 'absent':
+      return 'no hardware address (observed)';
+    case 'notObserved':
+      return 'not observed';
   }
 }
 

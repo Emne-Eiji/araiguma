@@ -33,6 +33,15 @@ export type OperState =
   | 'notPresent'
   | 'lowerLayerDown';
 
+// Hardware-address observation (mirror of the Rust MacObservation, schema
+// v2): a normalized address string ("aa:bb:cc:dd:ee:ff"), or one of the
+// sentinels 'absent' (observed to have NO hardware address, e.g. wireguard)
+// / 'notObserved'. JSON null is invalid: v1 null was ambiguous between the
+// two states and is rejected by the loaders.
+export type MacObservation = string;
+
+export type MacObservationKind = 'present' | 'absent' | 'notObserved';
+
 export type AdminState = 'up' | 'down';
 
 export type AddressScope = 'global' | 'site' | 'link' | 'host';
@@ -82,7 +91,7 @@ export interface Interface {
   kindDetail: string | null;
   operState: OperState | null;
   adminState: AdminState | null;
-  macAddress: string | null;
+  macAddress: MacObservation;
   mtu: number | null;
   txQueueLen: number | null;
   masterIfindex: number | null;
@@ -187,7 +196,7 @@ export type Evidence =
 export interface NodeDetail {
   ifindex: number | null;
   addresses: Address[];
-  macAddress: string | null;
+  macAddress: MacObservation;
   mtu: number | null;
   operState: OperState | null;
   adminState: AdminState | null;

@@ -3,7 +3,9 @@
 
 use std::path::PathBuf;
 
-use araiguma_core::model::{AdminState, InterfaceKind, ObservationSource, OperState};
+use araiguma_core::model::{
+    AdminState, InterfaceKind, MacObservation, ObservationSource, OperState,
+};
 use araiguma_core::provider::{DiscoveryProvider, ProviderId, ProviderState, SectionResult};
 use araiguma_sysfs::SysFsProvider;
 
@@ -38,14 +40,14 @@ fn basic_workstation_interfaces() {
     assert_eq!(lo.oper_state, Some(OperState::Unknown));
     assert_eq!(lo.admin_state, Some(AdminState::Up));
     assert_eq!(lo.mtu, Some(65536));
-    assert_eq!(lo.mac_address.as_deref(), Some("00:00:00:00:00:00"));
+    assert_eq!(lo.mac_address.present(), Some("00:00:00:00:00:00"));
 
     let eth0 = interfaces.iter().find(|i| i.name == "eth0").unwrap();
     assert_eq!(eth0.kind, InterfaceKind::Ethernet);
     assert_eq!(eth0.oper_state, Some(OperState::Up));
     assert_eq!(eth0.admin_state, Some(AdminState::Up));
     assert_eq!(eth0.mtu, Some(1500));
-    assert_eq!(eth0.mac_address.as_deref(), Some("52:54:00:12:34:56"));
+    assert_eq!(eth0.mac_address.present(), Some("52:54:00:12:34:56"));
     // The sysfs classification caveat is recorded per interface.
     assert!(eth0
         .notes
@@ -74,7 +76,7 @@ fn virtual_interfaces_classification() {
 
     let wg0 = interfaces.iter().find(|i| i.name == "wg0").unwrap();
     assert_eq!(wg0.kind, InterfaceKind::Virtual); // ARPHRD_NONE
-    assert_eq!(wg0.mac_address, None); // empty address file
+    assert_eq!(wg0.mac_address, MacObservation::Absent); // empty address file = observed absence
     assert_eq!(wg0.mtu, Some(1420));
     assert!(wg0.notes.iter().any(|n| n.contains("ARPHRD_NONE")));
 
@@ -234,4 +236,65 @@ fn bridge_master_symlink_resolves_to_ifindex() {
         .unwrap();
     assert_eq!(eth1_observed.master_ifindex, Some(5));
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn mac_observation_three_states_from_sysfs() {
+    // WO-02 correction §5: a present address, an existing-but-empty
+    // address file (observed absence), and a missing address file (not
+    // observed) are three distinct states.
+    let tmp = std::env::temp_dir().join(format!("araiguma-sysfs-mac-{}", std::process::id()));
+    let sys = tmp.join("sys");
+    let net = sys.join("class/net");
+    std::fs::create_dir_all(net.join("eth-present")).unwrap();
+    std::fs::create_dir_all(net.join("wg-absent")).unwrap();
+    std::fs::create_dir_all(net.join("weird-missing")).unwrap();
+    for (dir, file, content) in [
+        (net.join("eth-present"), "ifindex", "2\n"),
+        (net.join("eth-present"), "address", "52:54:00:12:34:56\n"),
+        (net.join("eth-present"), "operstate", "up\n"),
+        (net.join("eth-present"), "type", "1\n"),
+        (net.join("wg-absent"), "ifindex", "3\n"),
+        (net.join("wg-absent"), "address", "\n"), // empty: observed absence
+        (net.join("wg-absent"), "operstate", "unknown\n"),
+        (net.join("wg-absent"), "type", "65534\n"),
+        (net.join("weird-missing"), "ifindex", "4\n"),
+        // no address file at all: not observed
+        (net.join("weird-missing"), "operstate", "down\n"),
+        (net.join("weird-missing"), "type", "1\n"),
+    ] {
+        std::fs::write(dir.join(file), content).unwrap();
+    }
+    // An empty procfs root so the provider run stays valid.
+    let proc = tmp.join("proc/net");
+    std::fs::create_dir_all(&proc).unwrap();
+    std::fs::write(proc.join("route"), "").unwrap();
+    std::fs::write(proc.join("if_inet6"), "").unwrap();
+
+    let mut p = SysFsProvider::with_roots(&sys, tmp.join("proc"));
+    let observation = observe(&mut p);
+    let interfaces = observation.interfaces.items();
+
+    let present = interfaces.iter().find(|i| i.name == "eth-present").unwrap();
+    assert_eq!(
+        present.mac_address,
+        MacObservation::Present("52:54:00:12:34:56".into())
+    );
+    let absent = interfaces.iter().find(|i| i.name == "wg-absent").unwrap();
+    assert_eq!(
+        absent.mac_address,
+        MacObservation::Absent,
+        "an empty address file is an observed absence"
+    );
+    let missing = interfaces
+        .iter()
+        .find(|i| i.name == "weird-missing")
+        .unwrap();
+    assert_eq!(
+        missing.mac_address,
+        MacObservation::NotObserved,
+        "a missing address file means the address was not observed"
+    );
+
+    std::fs::remove_dir_all(&tmp).ok();
 }

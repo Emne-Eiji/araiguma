@@ -15,6 +15,7 @@ import type {
   TopologyEdgeKind,
   TopologyNode,
 } from '../types';
+import { isMacObservation } from './format';
 
 export interface TopologyFixture {
   name: string;
@@ -63,9 +64,10 @@ export function parseTopology(input: unknown): TopologyDocument {
     throw new Error('invalid topology document: expected an object');
   }
   const doc = input as Record<string, unknown>;
-  if (doc.schemaVersion !== 1) {
+  const schema = doc.schemaVersion;
+  if (schema !== 1 && schema !== 2) {
     throw new Error(
-      `invalid topology document: unsupported schemaVersion ${String(doc.schemaVersion)} (expected 1)`,
+      `invalid topology document: unsupported schemaVersion ${String(schema)} (expected 1 or 2; this build writes v2)`,
     );
   }
   if (!Array.isArray(doc.nodes) || !Array.isArray(doc.edges)) {
@@ -81,6 +83,21 @@ export function parseTopology(input: unknown): TopologyDocument {
     }
     if (node.nodeKind !== 'interface' && node.nodeKind !== 'gateway') {
       throw new Error(`invalid topology document: node ${String(node.label)} has an unknown kind`);
+    }
+    // MAC observation in node details follows the same v2 rule as
+    // snapshots: address string or sentinels, never null.
+    const detail = node.detail as Record<string, unknown> | undefined;
+    if (detail !== undefined) {
+      if (detail.macAddress === null || detail.macAddress === undefined) {
+        throw new Error(
+          `invalid topology document: node ${String(node.label)} detail.macAddress must not be null/absent — v1 null was ambiguous between "observed no hardware address" and "not observed"`,
+        );
+      }
+      if (!isMacObservation(detail.macAddress)) {
+        throw new Error(
+          `invalid topology document: node ${String(node.label)} detail.macAddress is not a hardware address or the sentinels 'absent'/'notObserved'`,
+        );
+      }
     }
   }
   return doc as unknown as TopologyDocument;

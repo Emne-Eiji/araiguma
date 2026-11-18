@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "timestampMs": 1765824004000,
   "interfaces": [],
   "addresses": [],
@@ -9,11 +9,41 @@
       "provider": "netlink",
       "state": "available",
       "sections": [
-        { "section": "interfaces", "outcome": { "kind": "observed", "count": 0 } },
-        { "section": "addressesV4", "outcome": { "kind": "observed", "count": 0 } },
-        { "section": "addressesV6", "outcome": { "kind": "observed", "count": 0 } },
-        { "section": "routesV4", "outcome": { "kind": "observed", "count": 0 } },
-        { "section": "routesV6", "outcome": { "kind": "observed", "count": 0 } }
+        {
+          "section": "interfaces",
+          "outcome": {
+            "kind": "observed",
+            "count": 0
+          }
+        },
+        {
+          "section": "addressesV4",
+          "outcome": {
+            "kind": "observed",
+            "count": 0
+          }
+        },
+        {
+          "section": "addressesV6",
+          "outcome": {
+            "kind": "observed",
+            "count": 0
+          }
+        },
+        {
+          "section": "routesV4",
+          "outcome": {
+            "kind": "observed",
+            "count": 0
+          }
+        },
+        {
+          "section": "routesV6",
+          "outcome": {
+            "kind": "observed",
+            "count": 0
+          }
+        }
       ],
       "notes": []
     },
@@ -21,11 +51,39 @@
       "provider": "sysfs",
       "state": "degraded",
       "sections": [
-        { "section": "interfaces", "outcome": { "kind": "observed", "count": 0 } },
-        { "section": "addressesV4", "outcome": { "kind": "unsupported" } },
-        { "section": "addressesV6", "outcome": { "kind": "observed", "count": 0 } },
-        { "section": "routesV4", "outcome": { "kind": "observed", "count": 0 } },
-        { "section": "routesV6", "outcome": { "kind": "unsupported" } }
+        {
+          "section": "interfaces",
+          "outcome": {
+            "kind": "observed",
+            "count": 0
+          }
+        },
+        {
+          "section": "addressesV4",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "addressesV6",
+          "outcome": {
+            "kind": "observed",
+            "count": 0
+          }
+        },
+        {
+          "section": "routesV4",
+          "outcome": {
+            "kind": "observed",
+            "count": 0
+          }
+        },
+        {
+          "section": "routesV6",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        }
       ],
       "notes": [
         "sysfs cannot distinguish dummy, veth, vlan and similar virtual interfaces from Ethernet (same ARPHRD type); netlink classification takes priority",

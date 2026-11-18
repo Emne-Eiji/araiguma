@@ -6,8 +6,8 @@ use std::net::{IpAddr, Ipv4Addr};
 use araiguma_core::merge::merge;
 use araiguma_core::model::{
     Address, AddressFamily, AddressScope, AdminState, Interface, InterfaceKind, IpNet,
-    ObservationSource, OperState, Route, RouteProtocol, RouteScope, RouteType, RT_TABLE_LOCAL,
-    RT_TABLE_MAIN,
+    MacObservation, ObservationSource, OperState, Route, RouteProtocol, RouteScope, RouteType,
+    RT_TABLE_LOCAL, RT_TABLE_MAIN,
 };
 use araiguma_core::provider::{ProviderId, ProviderObservation, SectionResult};
 
@@ -19,7 +19,7 @@ fn iface(ifindex: u32, name: &str, kind: InterfaceKind) -> Interface {
         kind_detail: None,
         oper_state: Some(OperState::Up),
         admin_state: Some(AdminState::Up),
-        mac_address: None,
+        mac_address: MacObservation::NotObserved,
         mtu: None,
         tx_queue_len: None,
         master_ifindex: None,
@@ -65,7 +65,7 @@ fn observation(provider: ProviderId, priority: u8) -> ProviderObservation {
 fn netlink_primary_and_sysfs_fills_gaps() {
     let mut netlink = observation(ProviderId::Netlink, 0);
     let mut eth = iface(2, "eth0", InterfaceKind::Ethernet);
-    eth.mac_address = Some("52:54:00:12:34:56".into());
+    eth.mac_address = MacObservation::Present("52:54:00:12:34:56".into());
     eth.sources = vec![ObservationSource::Netlink];
     netlink.interfaces = SectionResult::Observed(vec![eth]);
 
@@ -80,7 +80,7 @@ fn netlink_primary_and_sysfs_fills_gaps() {
     assert_eq!(snapshot.interfaces.len(), 1);
     let merged = &snapshot.interfaces[0];
     // Netlink's value wins where both observed.
-    assert_eq!(merged.mac_address.as_deref(), Some("52:54:00:12:34:56"));
+    assert_eq!(merged.mac_address.present(), Some("52:54:00:12:34:56"));
     // Sysfs fills the gap netlink left.
     assert_eq!(merged.mtu, Some(1500));
     // Sources keep priority order, primary first.
@@ -487,5 +487,73 @@ fn routes_without_an_observed_destination_sort_after_observed_ones() {
             "v4 254 192.168.1.0/24 m0",
             "v4 254 unknown via 10.0.0.1 m0", // destination-less last
         ]
+    );
+}
+
+// ── MAC observation merge semantics (WO-02 correction §5) ──────────────────
+
+#[test]
+fn mac_observation_merge_respects_priority_and_only_fills_not_observed() {
+    // Netlink (priority 0) observed an ABSENCE (wireguard); sysfs (priority
+    // 1) reports a present address from the same interface: the
+    // higher-priority observed absence stands — it is never "filled".
+    let mut netlink = observation(ProviderId::Netlink, 0);
+    let mut wg = iface(10, "wg0", InterfaceKind::Wireguard);
+    wg.mac_address = MacObservation::Absent;
+    wg.sources = vec![ObservationSource::Netlink];
+    netlink.interfaces = SectionResult::Observed(vec![wg]);
+
+    let mut sysfs = observation(ProviderId::SysFs, 1);
+    let mut wg_sysfs = iface(10, "wg0", InterfaceKind::Virtual);
+    wg_sysfs.mac_address = MacObservation::Present("00:11:22:33:44:55".into());
+    wg_sysfs.sources = vec![ObservationSource::SysFs];
+    sysfs.interfaces = SectionResult::Observed(vec![wg_sysfs]);
+
+    let snapshot = merge(vec![netlink, sysfs], 1);
+    assert_eq!(snapshot.interfaces[0].mac_address, MacObservation::Absent);
+}
+
+#[test]
+fn mac_observation_not_observed_is_filled_by_lower_priority_provider() {
+    // Netlink did not obtain the address; sysfs did: the gap is filled.
+    let mut netlink = observation(ProviderId::Netlink, 0);
+    let mut weird = iface(12, "weird0", InterfaceKind::Other);
+    weird.mac_address = MacObservation::NotObserved;
+    weird.sources = vec![ObservationSource::Netlink];
+    netlink.interfaces = SectionResult::Observed(vec![weird]);
+
+    let mut sysfs = observation(ProviderId::SysFs, 1);
+    let mut weird_sysfs = iface(12, "weird0", InterfaceKind::Ethernet);
+    weird_sysfs.mac_address = MacObservation::Present("66:2d:1a:55:aa:bb".into());
+    weird_sysfs.sources = vec![ObservationSource::SysFs];
+    sysfs.interfaces = SectionResult::Observed(vec![weird_sysfs]);
+
+    let snapshot = merge(vec![netlink, sysfs], 1);
+    assert_eq!(
+        snapshot.interfaces[0].mac_address,
+        MacObservation::Present("66:2d:1a:55:aa:bb".into())
+    );
+}
+
+#[test]
+fn mac_observation_present_survives_lower_priority_absent() {
+    // Netlink observed a real address; sysfs saw an empty file: the
+    // present observation stands.
+    let mut netlink = observation(ProviderId::Netlink, 0);
+    let mut eth = iface(2, "eth0", InterfaceKind::Ethernet);
+    eth.mac_address = MacObservation::Present("52:54:00:12:34:56".into());
+    eth.sources = vec![ObservationSource::Netlink];
+    netlink.interfaces = SectionResult::Observed(vec![eth]);
+
+    let mut sysfs = observation(ProviderId::SysFs, 1);
+    let mut eth_sysfs = iface(2, "eth0", InterfaceKind::Ethernet);
+    eth_sysfs.mac_address = MacObservation::Absent;
+    eth_sysfs.sources = vec![ObservationSource::SysFs];
+    sysfs.interfaces = SectionResult::Observed(vec![eth_sysfs]);
+
+    let snapshot = merge(vec![netlink, sysfs], 1);
+    assert_eq!(
+        snapshot.interfaces[0].mac_address,
+        MacObservation::Present("52:54:00:12:34:56".into())
     );
 }

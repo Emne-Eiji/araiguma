@@ -10,7 +10,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use araiguma_core::model::{
     Address, AddressFamily, AddressScope, AdminState, Interface, InterfaceKind, IpNet,
-    ObservationSource, OperState, Route, RouteProtocol, RouteScope, RouteType, RT_TABLE_MAIN,
+    MacObservation, ObservationSource, OperState, Route, RouteProtocol, RouteScope, RouteType,
+    RT_TABLE_MAIN,
 };
 use netlink_packet_route::address::{
     AddressAttribute, AddressFlags, AddressMessage, AddressScope as NlAddressScope,
@@ -161,6 +162,18 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
         AdminState::Down
     });
 
+    // MAC observation (v2). Within a successfully dumped link message, an
+    // absent or empty IFLA_ADDRESS is the kernel stating the device has no
+    // hardware address (e.g. wireguard, ARPHRD_NONE) — an observed absence,
+    // not missing data. A dump that failed entirely produces no message at
+    // all (the section reports the failure).
+    let mac_address = match mac_bytes {
+        Some(bytes) if !bytes.is_empty() => {
+            MacObservation::Present(format_mac(bytes).expect("non-empty is formattable"))
+        }
+        Some(_) | None => MacObservation::Absent,
+    };
+
     Some(Interface {
         ifindex,
         name: name?,
@@ -168,7 +181,7 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
         kind_detail,
         oper_state,
         admin_state,
-        mac_address: mac_bytes.and_then(format_mac),
+        mac_address,
         mtu,
         tx_queue_len,
         master_ifindex,
@@ -437,7 +450,7 @@ mod tests {
         assert_eq!(interface.kind_detail.as_deref(), Some("dummy"));
         assert_eq!(interface.admin_state, Some(AdminState::Up));
         assert_eq!(interface.oper_state, Some(OperState::Unknown));
-        assert_eq!(interface.mac_address.as_deref(), Some("66:2d:1a:55:aa:bb"));
+        assert_eq!(interface.mac_address.present(), Some("66:2d:1a:55:aa:bb"));
         assert_eq!(interface.mtu, Some(1500));
     }
 
@@ -449,7 +462,33 @@ mod tests {
         let interface = translate_link(&message).expect("valid link");
         assert_eq!(interface.kind, InterfaceKind::Loopback);
         assert_eq!(interface.kind_detail, None);
-        assert_eq!(interface.mac_address, None, "no address attribute");
+        assert_eq!(
+            interface.mac_address,
+            MacObservation::Absent,
+            "no address attribute"
+        );
+    }
+
+    #[test]
+    fn link_without_an_address_attribute_has_an_observed_absent_mac() {
+        // WO-02 correction §5: inside a successfully dumped message, a
+        // missing or empty IFLA_ADDRESS is the kernel stating the device
+        // has no hardware address — distinct from "not observed".
+        let mut message = link_message();
+        message.attributes = vec![
+            LinkAttribute::IfName("wg0".into()),
+            LinkAttribute::Mtu(1420),
+        ];
+        let interface = translate_link(&message).expect("valid link");
+        assert_eq!(interface.mac_address, MacObservation::Absent);
+
+        let mut empty = link_message();
+        empty.attributes = vec![
+            LinkAttribute::IfName("wg1".into()),
+            LinkAttribute::Address(Vec::new()),
+        ];
+        let interface = translate_link(&empty).expect("valid link");
+        assert_eq!(interface.mac_address, MacObservation::Absent);
     }
 
     #[test]

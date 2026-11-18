@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use araiguma_core::model::{
     Address, AddressFamily, AddressScope, AdminState, Interface, InterfaceKind, IpNet,
-    ObservationSource, OperState, Route, RT_TABLE_MAIN,
+    MacObservation, ObservationSource, OperState, Route, RT_TABLE_MAIN,
 };
 use araiguma_core::provider::{DiscoveryProvider, ProviderId, ProviderObservation, SectionResult};
 
@@ -212,9 +212,21 @@ fn read_one_interface(path: &Path, ifindex: u32, name: &str) -> Interface {
                 AdminState::Down
             }
         });
-    let mac_address = read_file(&path.join("address"))
-        .map(|s| s.trim().to_ascii_lowercase())
-        .filter(|s| !s.is_empty());
+    // MAC observation (v2): the sysfs `address` file is authoritative
+    // about the interface's own claim. An existing-but-empty file is an
+    // observed absence (e.g. wireguard); a missing/unreadable file means
+    // the address was not observed — never a silent zero/empty value.
+    let mac_address = match std::fs::read_to_string(path.join("address")) {
+        Ok(content) => {
+            let trimmed = content.trim().to_ascii_lowercase();
+            if trimmed.is_empty() {
+                MacObservation::Absent
+            } else {
+                MacObservation::Present(trimmed)
+            }
+        }
+        Err(_) => MacObservation::NotObserved,
+    };
     let mtu = read_file(&path.join("mtu")).and_then(|s| parse::parse_dec_u32(&s));
     let tx_queue_len = read_file(&path.join("tx_queue_len")).and_then(|s| {
         s.trim()

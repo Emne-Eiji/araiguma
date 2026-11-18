@@ -9,7 +9,7 @@
     nodeKindLabel,
     nodeIdKey,
   } from '../lib/topology';
-  import { kindLabel } from '../lib/format';
+  import { formatMacObservation, kindLabel, macObservationKind } from '../lib/format';
 
   let {
     node,
@@ -65,8 +65,18 @@
         <dt>ifindex</dt>
         <dd class="mono">{node.detail.ifindex ?? '—'}</dd>
         <dt>MAC</dt>
-        <dd class="mono" title={node.detail.macAddress ? undefined : 'not observed'}>
-          {node.detail.macAddress ?? '—'}
+        <dd
+          class="mono"
+          class:dim={macObservationKind(node.detail.macAddress) !== 'present'}
+          title={
+            macObservationKind(node.detail.macAddress) === 'absent'
+              ? 'observed: this interface has no hardware address'
+              : macObservationKind(node.detail.macAddress) === 'notObserved'
+                ? 'not observed'
+                : undefined
+          }
+        >
+          {formatMacObservation(node.detail.macAddress)}
         </dd>
         <dt>MTU</dt>
         <dd class="mono">{node.detail.mtu ?? '—'}</dd>

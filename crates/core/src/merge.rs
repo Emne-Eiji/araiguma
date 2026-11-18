@@ -14,9 +14,11 @@
 
 use std::net::IpAddr;
 
-use crate::model::{Address, AddressFamily, Interface, IpNet, Route, RT_TABLE_MAIN};
+use crate::model::{
+    Address, AddressFamily, Interface, IpNet, MacObservation, Route, RT_TABLE_MAIN,
+};
 use crate::provider::{ProviderObservation, ProviderReport};
-use crate::snapshot::NetworkSnapshot;
+use crate::snapshot::{NetworkSnapshot, SNAPSHOT_SCHEMA_VERSION};
 
 /// Merge provider observations into a snapshot.
 pub fn merge(observations: Vec<ProviderObservation>, timestamp_ms: u64) -> NetworkSnapshot {
@@ -109,7 +111,7 @@ pub fn merge(observations: Vec<ProviderObservation>, timestamp_ms: u64) -> Netwo
     let providers: Vec<ProviderReport> = observations.iter().map(|o| o.summarize()).collect();
 
     NetworkSnapshot {
-        schema_version: 1,
+        schema_version: SNAPSHOT_SCHEMA_VERSION,
         timestamp_ms,
         interfaces,
         addresses,
@@ -182,7 +184,12 @@ fn merge_interface(into: &mut Vec<Interface>, new: Interface) {
         merge_field(&mut existing.kind_detail, new.kind_detail);
         merge_field(&mut existing.oper_state, new.oper_state);
         merge_field(&mut existing.admin_state, new.admin_state);
-        merge_field(&mut existing.mac_address, new.mac_address);
+        // MAC semantics (v2): a higher-priority observation of either
+        // Present or Absent stands; NotObserved is the only gap a
+        // lower-priority provider may fill.
+        if existing.mac_address == MacObservation::NotObserved {
+            existing.mac_address = new.mac_address.clone();
+        }
         merge_field(&mut existing.mtu, new.mtu);
         merge_field(&mut existing.tx_queue_len, new.tx_queue_len);
         merge_field(&mut existing.master_ifindex, new.master_ifindex);

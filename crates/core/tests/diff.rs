@@ -1,6 +1,8 @@
 //! Snapshot diffing: events between two observation runs.
 
-use araiguma_core::model::{AdminState, Interface, InterfaceKind, ObservationSource, OperState};
+use araiguma_core::model::{
+    AdminState, Interface, InterfaceKind, MacObservation, ObservationSource, OperState,
+};
 use araiguma_core::snapshot::{diff_snapshots, NetworkEvent, NetworkSnapshot};
 
 fn empty_snapshot() -> NetworkSnapshot {
@@ -22,7 +24,7 @@ fn iface(ifindex: u32, name: &str, oper: OperState) -> Interface {
         kind_detail: None,
         oper_state: Some(oper),
         admin_state: Some(AdminState::Up),
-        mac_address: None,
+        mac_address: MacObservation::NotObserved,
         mtu: Some(1500),
         tx_queue_len: None,
         master_ifindex: None,

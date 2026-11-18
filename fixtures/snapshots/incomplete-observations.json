@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "timestampMs": 1765824001000,
   "interfaces": [
     {
@@ -14,7 +14,9 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["sysfs"],
+      "sources": [
+        "sysfs"
+      ],
       "notes": []
     },
     {
@@ -29,7 +31,9 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["sysfs"],
+      "sources": [
+        "sysfs"
+      ],
       "notes": [
         "classification caveat: sysfs cannot distinguish dummy, veth, vlan and similar virtual interfaces from Ethernet (same ARPHRD type)"
       ]
@@ -46,7 +50,9 @@
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["sysfs"],
+      "sources": [
+        "sysfs"
+      ],
       "notes": []
     },
     {
@@ -56,12 +62,14 @@
       "kindDetail": null,
       "operState": "unknown",
       "adminState": "up",
-      "macAddress": null,
+      "macAddress": "absent",
       "mtu": 1420,
       "txQueueLen": 1000,
       "masterIfindex": null,
       "parentIfindex": null,
-      "sources": ["sysfs"],
+      "sources": [
+        "sysfs"
+      ],
       "notes": [
         "classification caveat: sysfs cannot classify this interface further (ARPHRD_NONE); netlink would likely classify it as wireguard or tunnel"
       ]
@@ -74,9 +82,13 @@
       "address": "::1",
       "prefixLen": 128,
       "scope": "host",
-      "flags": ["permanent"],
+      "flags": [
+        "permanent"
+      ],
       "label": null,
-      "sources": ["procfs"]
+      "sources": [
+        "procfs"
+      ]
     },
     {
       "ifindex": 2,
@@ -84,9 +96,13 @@
       "address": "fe80::5054:ff:fe12:3456",
       "prefixLen": 64,
       "scope": "link",
-      "flags": ["permanent"],
+      "flags": [
+        "permanent"
+      ],
       "label": null,
-      "sources": ["procfs"]
+      "sources": [
+        "procfs"
+      ]
     },
     {
       "ifindex": 2,
@@ -96,13 +112,18 @@
       "scope": "global",
       "flags": [],
       "label": null,
-      "sources": ["procfs"]
+      "sources": [
+        "procfs"
+      ]
     }
   ],
   "routes": [
     {
       "family": "ipv4",
-      "destination": { "address": "0.0.0.0", "prefixLen": 0 },
+      "destination": {
+        "address": "0.0.0.0",
+        "prefixLen": 0
+      },
       "gateway": "192.168.0.1",
       "outputInterface": 2,
       "outputInterfaceName": "eth0",
@@ -112,14 +133,19 @@
       "metric": 600,
       "table": 254,
       "flags": null,
-      "sources": ["procfs"],
+      "sources": [
+        "procfs"
+      ],
       "notes": [
         "table implied: /proc/net/route exposes only the main table (254)"
       ]
     },
     {
       "family": "ipv4",
-      "destination": { "address": "192.168.0.0", "prefixLen": 24 },
+      "destination": {
+        "address": "192.168.0.0",
+        "prefixLen": 24
+      },
       "gateway": null,
       "outputInterface": 2,
       "outputInterfaceName": "eth0",
@@ -129,14 +155,19 @@
       "metric": 0,
       "table": 254,
       "flags": null,
-      "sources": ["procfs"],
+      "sources": [
+        "procfs"
+      ],
       "notes": [
         "table implied: /proc/net/route exposes only the main table (254)"
       ]
     },
     {
       "family": "ipv4",
-      "destination": { "address": "127.0.0.0", "prefixLen": 8 },
+      "destination": {
+        "address": "127.0.0.0",
+        "prefixLen": 8
+      },
       "gateway": null,
       "outputInterface": 1,
       "outputInterfaceName": "lo",
@@ -146,7 +177,9 @@
       "metric": 0,
       "table": 254,
       "flags": null,
-      "sources": ["procfs"],
+      "sources": [
+        "procfs"
+      ],
       "notes": [
         "table implied: /proc/net/route exposes only the main table (254)"
       ]
@@ -157,11 +190,41 @@
       "provider": "netlink",
       "state": "unavailable",
       "sections": [
-        { "section": "interfaces", "outcome": { "kind": "failed", "error": "netlink socket: Operation not permitted (errno 1)" } },
-        { "section": "addressesV4", "outcome": { "kind": "failed", "error": "netlink socket: Operation not permitted (errno 1)" } },
-        { "section": "addressesV6", "outcome": { "kind": "failed", "error": "netlink socket: Operation not permitted (errno 1)" } },
-        { "section": "routesV4", "outcome": { "kind": "failed", "error": "netlink socket: Operation not permitted (errno 1)" } },
-        { "section": "routesV6", "outcome": { "kind": "failed", "error": "netlink socket: Operation not permitted (errno 1)" } }
+        {
+          "section": "interfaces",
+          "outcome": {
+            "kind": "failed",
+            "error": "netlink socket: Operation not permitted (errno 1)"
+          }
+        },
+        {
+          "section": "addressesV4",
+          "outcome": {
+            "kind": "failed",
+            "error": "netlink socket: Operation not permitted (errno 1)"
+          }
+        },
+        {
+          "section": "addressesV6",
+          "outcome": {
+            "kind": "failed",
+            "error": "netlink socket: Operation not permitted (errno 1)"
+          }
+        },
+        {
+          "section": "routesV4",
+          "outcome": {
+            "kind": "failed",
+            "error": "netlink socket: Operation not permitted (errno 1)"
+          }
+        },
+        {
+          "section": "routesV6",
+          "outcome": {
+            "kind": "failed",
+            "error": "netlink socket: Operation not permitted (errno 1)"
+          }
+        }
       ],
       "notes": []
     },
@@ -169,11 +232,39 @@
       "provider": "sysfs",
       "state": "degraded",
       "sections": [
-        { "section": "interfaces", "outcome": { "kind": "observed", "count": 4 } },
-        { "section": "addressesV4", "outcome": { "kind": "unsupported" } },
-        { "section": "addressesV6", "outcome": { "kind": "observed", "count": 3 } },
-        { "section": "routesV4", "outcome": { "kind": "observed", "count": 3 } },
-        { "section": "routesV6", "outcome": { "kind": "unsupported" } }
+        {
+          "section": "interfaces",
+          "outcome": {
+            "kind": "observed",
+            "count": 4
+          }
+        },
+        {
+          "section": "addressesV4",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "addressesV6",
+          "outcome": {
+            "kind": "observed",
+            "count": 3
+          }
+        },
+        {
+          "section": "routesV4",
+          "outcome": {
+            "kind": "observed",
+            "count": 3
+          }
+        },
+        {
+          "section": "routesV6",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        }
       ],
       "notes": [
         "sysfs cannot distinguish dummy, veth, vlan and similar virtual interfaces from Ethernet (same ARPHRD type); netlink classification takes priority",

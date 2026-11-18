@@ -1,6 +1,11 @@
 <script lang="ts">
   import type { Address, Interface, NetworkSnapshot } from '../types';
-  import { formatMissing, interfaceStateChip, kindLabel } from '../lib/format';
+  import {
+    formatMacObservation,
+    interfaceStateChip,
+    kindLabel,
+    macObservationKind,
+  } from '../lib/format';
 
   let {
     iface,
@@ -57,7 +62,19 @@
       <dt>ifindex</dt>
       <dd class="mono">{iface.ifindex}</dd>
       <dt>MAC address</dt>
-      <dd class="mono" title={iface.macAddress ? undefined : 'not observed'}>{formatMissing(iface.macAddress)}</dd>
+      <dd
+        class="mono"
+        class:dim={macObservationKind(iface.macAddress) !== 'present'}
+        title={
+          macObservationKind(iface.macAddress) === 'absent'
+            ? 'observed: this interface has no hardware address (e.g. wireguard)'
+            : macObservationKind(iface.macAddress) === 'notObserved'
+              ? 'not observed'
+              : undefined
+        }
+      >
+        {formatMacObservation(iface.macAddress)}
+      </dd>
       <dt>MTU</dt>
       <dd class="mono">{iface.mtu ?? '—'}</dd>
       <dt>Master</dt>
