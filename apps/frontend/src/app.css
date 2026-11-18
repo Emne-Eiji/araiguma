@@ -1,0 +1,94 @@
+/* Araiguma design tokens: restrained dark charcoal surfaces with cyan,
+   blue, and green accents. No web fonts — the system stack is the identity. */
+
+:root {
+  --bg-base: #0b0c0f;
+  --bg-panel: #12141a;
+  --bg-raised: #171a21;
+  --bg-hover: #1d212b;
+  --bg-inset: #0e1015;
+
+  --border-subtle: #232833;
+  --border-strong: #303748;
+
+  --text-primary: #e8eaef;
+  --text-secondary: #9aa2b1;
+  --text-muted: #667082;
+
+  --accent: #4cc9e8;
+  --accent-blue: #6d9eeb;
+  --accent-green: #52c58f;
+
+  --state-up: #52c58f;
+  --state-down: #d07676;
+  --state-unknown: #c9a44d;
+  --state-unavailable: #8b93a3;
+
+  --radius-s: 6px;
+  --radius-m: 10px;
+
+  --font-sans:
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, 'Liberation Mono',
+    monospace;
+
+  --shadow-panel: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100%;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.93em;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+:where(button, a, [role='button']):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-s);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

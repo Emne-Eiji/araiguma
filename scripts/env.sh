@@ -33,10 +33,6 @@ esac
 # npm: the cache must stay out of the persistent tree.
 export npm_config_cache="${npm_config_cache:-/tmp/araiguma-npm-cache}"
 
-# node_modules lives outside the persistent tree; apps/frontend/node_modules
-# is a (gitignored) symlink to this directory, recreated by bootstrap.sh.
-export ARIGUMA_NODE_MODULES_DIR="${ARIGUMA_NODE_MODULES_DIR:-/tmp/araiguma-node-modules}"
-
 # Playwright browsers live in the ephemeral home cache by default.
 export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
 

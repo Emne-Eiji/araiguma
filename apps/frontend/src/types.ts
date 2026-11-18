@@ -1,0 +1,163 @@
+// TypeScript mirror of the Rust observation model (araiguma-core).
+//
+// SYNC CONTRACT (docs/development.md): these types are locked to
+// fixtures/snapshots/*.json from both sides — Rust tests parse every fixture
+// with serde (the authoritative model), and the frontend tests parse the
+// same files with these types. A change on either side that breaks the
+// fixtures fails the suite. When editing this file, update the Rust model
+// and the fixtures in the same commit.
+
+export type AddressFamily = 'ipv4' | 'ipv6';
+export type ObservationSource = 'netlink' | 'sysfs' | 'procfs';
+
+export type InterfaceKind =
+  | 'loopback'
+  | 'ethernet'
+  | 'wireless'
+  | 'bridge'
+  | 'bond'
+  | 'dummy'
+  | 'wireguard'
+  | 'tunnel'
+  | 'veth'
+  | 'vlan'
+  | 'virtual'
+  | 'other';
+
+export type OperState =
+  | 'up'
+  | 'down'
+  | 'unknown'
+  | 'testing'
+  | 'dormant'
+  | 'notPresent'
+  | 'lowerLayerDown';
+
+export type AdminState = 'up' | 'down';
+
+export type AddressScope = 'global' | 'site' | 'link' | 'host';
+
+export type RouteProtocol =
+  | 'unspec'
+  | 'redirect'
+  | 'kernel'
+  | 'boot'
+  | 'static'
+  | 'ra'
+  | 'dhcp'
+  | { other: number };
+
+export type RouteScope =
+  | 'universe'
+  | 'site'
+  | 'link'
+  | 'host'
+  | 'nowhere'
+  | { other: number };
+
+export type RouteType =
+  | 'unspec'
+  | 'unicast'
+  | 'local'
+  | 'broadcast'
+  | 'anycast'
+  | 'multicast'
+  | 'blackhole'
+  | 'unreachable'
+  | 'prohibit'
+  | 'throw'
+  | 'nat'
+  | 'xresolve'
+  | { other: number };
+
+export interface IpNet {
+  address: string;
+  prefixLen: number;
+}
+
+export interface Interface {
+  ifindex: number;
+  name: string;
+  kind: InterfaceKind;
+  kindDetail: string | null;
+  operState: OperState | null;
+  adminState: AdminState | null;
+  macAddress: string | null;
+  mtu: number | null;
+  txQueueLen: number | null;
+  masterIfindex: number | null;
+  parentIfindex: number | null;
+  sources: ObservationSource[];
+  notes: string[];
+}
+
+export interface Address {
+  ifindex: number;
+  family: AddressFamily;
+  address: string;
+  prefixLen: number;
+  scope: AddressScope | null;
+  flags: string[] | null;
+  label: string | null;
+  sources: ObservationSource[];
+}
+
+export interface Route {
+  family: AddressFamily;
+  destination: IpNet | null;
+  gateway: string | null;
+  outputInterface: number | null;
+  outputInterfaceName: string | null;
+  protocol: RouteProtocol | null;
+  scope: RouteScope | null;
+  routeType: RouteType | null;
+  metric: number | null;
+  table: number | null;
+  flags: string[] | null;
+  sources: ObservationSource[];
+  notes: string[];
+}
+
+export type ProviderId = 'netlink' | 'sysfs';
+
+export type ProviderState =
+  | 'notYetObserved'
+  | 'available'
+  | 'degraded'
+  | 'partial'
+  | 'unavailable'
+  | 'notSupported';
+
+export type SectionKind =
+  | 'interfaces'
+  | 'addressesV4'
+  | 'addressesV6'
+  | 'routesV4'
+  | 'routesV6';
+
+export type SectionOutcome =
+  | { kind: 'observed'; count: number }
+  | { kind: 'failed'; error: string }
+  | { kind: 'unsupported' }
+  | { kind: 'notObserved' };
+
+export interface SectionReport {
+  section: SectionKind;
+  outcome: SectionOutcome;
+}
+
+export interface ProviderReport {
+  provider: ProviderId;
+  state: ProviderState;
+  sections: SectionReport[];
+  notes: string[];
+}
+
+export interface NetworkSnapshot {
+  schemaVersion: number;
+  timestampMs: number;
+  interfaces: Interface[];
+  addresses: Address[];
+  routes: Route[];
+  providers: ProviderReport[];
+}

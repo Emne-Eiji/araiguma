@@ -36,43 +36,16 @@ else
   log "workspace has no crates yet; skipping cargo fetch"
 fi
 
-# --- 3. Frontend dependencies ---------------------------------------------
+# --- 3. Frontend tooling (ephemeral work copy; see scripts/frontend.sh) ----
 if [ -f apps/frontend/package.json ]; then
-  FE=apps/frontend
-  mkdir -p "$ARIGUMA_NODE_MODULES_DIR"
-  if [ -L "$FE/node_modules" ]; then
-    log "node_modules symlink ok -> $ARIGUMA_NODE_MODULES_DIR"
-  elif [ -d "$FE/node_modules" ]; then
-    log "moving node_modules out of the persistent tree"
-    rm -rf "$ARIGUMA_NODE_MODULES_DIR"
-    mv "$FE/node_modules" "$ARIGUMA_NODE_MODULES_DIR"
-    ln -s "$ARIGUMA_NODE_MODULES_DIR" "$FE/node_modules"
-  else
-    ln -s "$ARIGUMA_NODE_MODULES_DIR" "$FE/node_modules"
-  fi
-  if [ -f "$FE/package-lock.json" ]; then
-    (cd "$FE" && npm ci --no-audit --no-fund)
-  else
-    (cd "$FE" && npm install --no-audit --no-fund)
-  fi
-  # npm may have replaced the symlink with a real directory; restore the rule.
-  if [ ! -L "$FE/node_modules" ]; then
-    log "npm replaced the node_modules symlink; restoring"
-    rm -rf "$ARIGUMA_NODE_MODULES_DIR"
-    mv "$FE/node_modules" "$ARIGUMA_NODE_MODULES_DIR"
-    ln -s "$ARIGUMA_NODE_MODULES_DIR" "$FE/node_modules"
-  fi
-  log "frontend deps ok (node $(node --version), npm $(npm --version))"
+  scripts/frontend.sh prepare
 fi
 
-# --- 4. Playwright browsers ------------------------------------------------
-if [ -f apps/frontend/package.json ]; then
-  if [ -n "$(ls -A "$PLAYWRIGHT_BROWSERS_PATH" 2>/dev/null || true)" ]; then
-    log "playwright browsers present in $PLAYWRIGHT_BROWSERS_PATH"
-  else
-    log "installing playwright chromium"
-    (cd apps/frontend && npx playwright install chromium)
-  fi
+# --- 4. Playwright browsers (informational) --------------------------------
+if [ -n "$(ls -A "$PLAYWRIGHT_BROWSERS_PATH" 2>/dev/null || true)" ]; then
+  log "playwright browsers present in $PLAYWRIGHT_BROWSERS_PATH"
+else
+  log "playwright browsers absent; scripts/frontend.sh e2e will fetch them"
 fi
 
 # --- 5. Durable-storage budget --------------------------------------------
