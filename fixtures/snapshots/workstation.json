@@ -382,7 +382,8 @@
       ],
       "notes": [
         "sysfs cannot distinguish dummy, veth, vlan and similar virtual interfaces from Ethernet (same ARPHRD type); netlink classification takes priority",
-        "/proc/net/if_inet6 exposes the address scope and permanent flag only; other address flags are not available from procfs"
+        "/proc/net/if_inet6 exposes the address scope and IFA_F flag bits only; address labels are not available from procfs",
+        "route fields protocol/scope/type are not available from /proc/net/route"
       ]
     }
   ]

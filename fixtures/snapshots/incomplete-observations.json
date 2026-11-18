@@ -163,9 +163,7 @@
         { "section": "routesV4", "outcome": { "kind": "failed", "error": "netlink socket: Operation not permitted (errno 1)" } },
         { "section": "routesV6", "outcome": { "kind": "failed", "error": "netlink socket: Operation not permitted (errno 1)" } }
       ],
-      "notes": [
-        "all sections failed in this run; the sysfs/procfs provider is carrying the observation"
-      ]
+      "notes": []
     },
     {
       "provider": "sysfs",
@@ -179,8 +177,8 @@
       ],
       "notes": [
         "sysfs cannot distinguish dummy, veth, vlan and similar virtual interfaces from Ethernet (same ARPHRD type); netlink classification takes priority",
-        "route fields protocol/scope/type are not available from /proc/net/route",
-        "/proc/net/if_inet6 exposes the address scope and permanent flag only; other address flags are not available from procfs"
+        "/proc/net/if_inet6 exposes the address scope and IFA_F flag bits only; address labels are not available from procfs",
+        "route fields protocol/scope/type are not available from /proc/net/route"
       ]
     }
   ]

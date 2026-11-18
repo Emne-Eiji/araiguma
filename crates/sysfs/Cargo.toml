@@ -1,0 +1,14 @@
+[package]
+name = "araiguma-sysfs"
+description = "Araiguma sysfs/procfs discovery provider (read-only fallback)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+araiguma-core = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+futures = { workspace = true }
