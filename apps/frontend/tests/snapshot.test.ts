@@ -105,7 +105,9 @@ describe('MAC observation validation (schema v2)', () => {
   const base = (macAddress: unknown) => ({
     schemaVersion: 2,
     timestampMs: 0,
-    interfaces: [{ name: 'eth0', ifindex: 2, kind: 'ethernet', macAddress }],
+    interfaces: [
+      { name: 'eth0', ifindex: 2, kind: 'ethernet', macAddress, sources: ['netlink'], notes: [] },
+    ],
     addresses: [],
     routes: [],
     providers: [],

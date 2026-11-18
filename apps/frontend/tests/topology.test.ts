@@ -70,6 +70,23 @@ describe('topology goldens (type-sync contract)', () => {
   });
 });
 
+function emptyDetail() {
+  return {
+    ifindex: 1,
+    addresses: [],
+    macAddress: 'notObserved',
+    mtu: null,
+    operState: null,
+    adminState: null,
+    masterIfindex: null,
+    parentIfindex: null,
+    routesUsing: 0,
+    defaultRoutes: 0,
+    sources: ['netlink'],
+    notes: [],
+  };
+}
+
 describe('parseTopology rejects invalid input', () => {
   it('rejects non-objects and wrong schema versions', () => {
     expect(() => parseTopology(null)).toThrow();
@@ -78,11 +95,29 @@ describe('parseTopology rejects invalid input', () => {
   });
 
   it('rejects nodes without ids or labels', () => {
+    const base = {
+      schemaVersion: 2,
+      sourceTimestampMs: 0,
+      edges: [],
+    };
     expect(() =>
-      parseTopology({ schemaVersion: 2, nodes: [{ label: 'x', nodeKind: 'interface' }], edges: [] }),
+      parseTopology({
+        ...base,
+        nodes: [{ label: 'x', nodeKind: 'interface', detail: emptyDetail() }],
+      }),
     ).toThrow(/id/);
     expect(() =>
-      parseTopology({ schemaVersion: 2, nodes: [{ id: { interface: { ifindex: 1 } }, label: '', nodeKind: 'interface' }], edges: [] }),
+      parseTopology({
+        ...base,
+        nodes: [
+          {
+            id: { interface: { ifindex: 1 } },
+            label: '',
+            nodeKind: 'interface',
+            detail: emptyDetail(),
+          },
+        ],
+      }),
     ).toThrow(/label/);
   });
 
@@ -91,18 +126,20 @@ describe('parseTopology rejects invalid input', () => {
       id: { interface: { ifindex: 1 } },
       label: 'eth0',
       nodeKind: 'interface',
-      detail: { macAddress },
+      state: 'active',
+      annotations: [],
+      detail: { ...emptyDetail(), macAddress },
     });
-    expect(() =>
-      parseTopology({ schemaVersion: 2, nodes: [node('52:54:00:12:34:56')], edges: [] }),
-    ).not.toThrow();
-    expect(() => parseTopology({ schemaVersion: 2, nodes: [node('absent')], edges: [] })).not.toThrow();
-    expect(() => parseTopology({ schemaVersion: 2, nodes: [node(null)], edges: [] })).toThrow(
-      /ambiguous/,
-    );
-    expect(() => parseTopology({ schemaVersion: 2, nodes: [node('zzz')], edges: [] })).toThrow(
-      /hardware address|sentinels/,
-    );
+    const doc = (n: unknown) => ({
+      schemaVersion: 2,
+      sourceTimestampMs: 0,
+      nodes: [n],
+      edges: [],
+    });
+    expect(() => parseTopology(doc(node('52:54:00:12:34:56')))).not.toThrow();
+    expect(() => parseTopology(doc(node('absent')))).not.toThrow();
+    expect(() => parseTopology(doc(node(null)))).toThrow(/ambiguous/);
+    expect(() => parseTopology(doc(node('zzz')))).toThrow(/hardware address|sentinels/);
   });
 });
 

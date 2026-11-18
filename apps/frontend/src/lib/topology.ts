@@ -16,6 +16,180 @@ import type {
   TopologyNode,
 } from '../types';
 import { isMacObservation } from './format';
+import {
+  asArray,
+  asEnum,
+  asInt,
+  asIpAddress,
+  asNonEmptyString,
+  asPrefixLen,
+  asRecord,
+  asString,
+  asStringArray,
+  fail,
+  optional,
+} from './validate';
+
+const INTERFACE_KINDS = [
+  'loopback',
+  'ethernet',
+  'wireless',
+  'bridge',
+  'bond',
+  'dummy',
+  'wireguard',
+  'tunnel',
+  'veth',
+  'vlan',
+  'virtual',
+  'other',
+] as const;
+
+const EDGE_KINDS = [
+  'bridgeMember',
+  'bondMember',
+  'masterMember',
+  'linkParent',
+  'gatewayRoute',
+  'gatewayInferred',
+] as const;
+const NODE_KINDS = ['interface', 'gateway'] as const;
+const NODE_STATES = ['active', 'inactive', 'unknown'] as const;
+const OBSERVATION_SOURCES = ['netlink', 'sysfs', 'procfs'] as const;
+const ADDRESS_SCOPES = ['global', 'site', 'link', 'host'] as const;
+const FAMILIES = ['ipv4', 'ipv6'] as const;
+
+interface ValidatedNode {
+  key: string;
+  id: NodeId;
+  node: TopologyNode;
+}
+
+function validateNodeId(raw: unknown, path: string): NodeId {
+  const id = asRecord(raw, path);
+  if (id.interface !== undefined) {
+    const inner = asRecord(id.interface, `${path}.interface`);
+    asInt(inner.ifindex, `${path}.interface.ifindex`, { min: 1 });
+    return { interface: { ifindex: inner.ifindex as number } };
+  }
+  if (id.gateway !== undefined) {
+    const inner = asRecord(id.gateway, `${path}.gateway`);
+    asIpAddress(inner.address, `${path}.gateway.address`);
+    return { gateway: { address: inner.address as string } };
+  }
+  fail(path, 'expected an id of {interface:{ifindex}} or {gateway:{address}}');
+}
+
+function validateDetailAddress(raw: unknown, path: string): void {
+  const address = asRecord(raw, path);
+  asInt(address.ifindex, `${path}.ifindex`, { min: 1 });
+  const family = asEnum(address.family, FAMILIES, `${path}.family`);
+  asIpAddress(address.address, `${path}.address`, family);
+  asPrefixLen(address.prefixLen, family, `${path}.prefixLen`);
+  optional((v, p) => asEnum(v, ADDRESS_SCOPES, p), address.scope, `${path}.scope`);
+  optional(asStringArray, address.flags, `${path}.flags`);
+  optional(asString, address.label, `${path}.label`);
+  asArray(address.sources, `${path}.sources`);
+}
+
+function validateNode(raw: unknown, path: string): ValidatedNode {
+  const node = asRecord(raw, path);
+  const id = validateNodeId(node.id, `${path}.id`);
+  asNonEmptyString(node.label, `${path}.label`);
+  const nodeKind = asEnum(node.nodeKind, NODE_KINDS, `${path}.nodeKind`);
+  if (nodeKind === 'gateway' && node.interfaceKind !== undefined && node.interfaceKind !== null) {
+    fail(`${path}.interfaceKind`, 'gateway nodes must not carry an interface kind');
+  }
+  if (nodeKind === 'interface') {
+    optional((v, p) => asEnum(v, INTERFACE_KINDS, p), node.interfaceKind, `${path}.interfaceKind`);
+  }
+  optional(asString, node.kindDetail, `${path}.kindDetail`);
+  asEnum(node.state, NODE_STATES, `${path}.state`);
+  asStringArray(node.annotations, `${path}.annotations`);
+
+  const detail = asRecord(node.detail, `${path}.detail`);
+  optional((v, p) => asInt(v, p, { min: 1 }), detail.ifindex, `${path}.detail.ifindex`);
+  asArray(detail.addresses, `${path}.detail.addresses`).forEach((address, i) => {
+    validateDetailAddress(address, `${path}.detail.addresses[${i}]`);
+  });
+  // MAC observation in node details follows the same v2 rule as snapshots:
+  // address string or sentinels, never null.
+  if (detail.macAddress === null || detail.macAddress === undefined) {
+    fail(
+      `${path}.detail.macAddress`,
+      'must not be null/absent — v1 null was ambiguous between "observed no hardware address" and "not observed"',
+    );
+  }
+  if (!isMacObservation(detail.macAddress)) {
+    fail(
+      `${path}.detail.macAddress`,
+      `expected a hardware address or the sentinels 'absent'/'notObserved', got ${JSON.stringify(detail.macAddress)}`,
+    );
+  }
+  optional((v, p) => asInt(v, p, { min: 0 }), detail.mtu, `${path}.detail.mtu`);
+  optional(asStringArray, detail.notes, `${path}.detail.notes`);
+  asArray(detail.sources, `${path}.detail.sources`);
+  const routesUsing = asInt(detail.routesUsing, `${path}.detail.routesUsing`, { min: 0 });
+  const defaultRoutes = asInt(detail.defaultRoutes, `${path}.detail.defaultRoutes`, { min: 0 });
+  if (defaultRoutes > routesUsing) {
+    fail(
+      `${path}.detail.defaultRoutes`,
+      `default routes (${defaultRoutes}) cannot exceed routes using the interface (${routesUsing})`,
+    );
+  }
+
+  return { key: nodeIdKey(id), id, node: node as unknown as TopologyNode };
+}
+
+function parseTopologyInner(input: unknown): TopologyDocument {
+  const doc = asRecord(input, '$');
+  const schema = doc.schemaVersion;
+  if (schema !== 1 && schema !== 2) {
+    fail(
+      '$.schemaVersion',
+      `unsupported schemaVersion ${String(schema)} (expected 1 or 2; this build writes v2)`,
+    );
+  }
+  asInt(doc.sourceTimestampMs, '$.sourceTimestampMs', { min: 0 });
+
+  const seenKeys = new Set<string>();
+  asArray(doc.nodes, '$.nodes').forEach((raw, i) => {
+    const validated = validateNode(raw, `$.nodes[${i}]`);
+    if (seenKeys.has(validated.key)) {
+      fail(`$.nodes[${i}].id`, `duplicate node id (${validated.key})`);
+    }
+    seenKeys.add(validated.key);
+  });
+
+  asArray(doc.edges, '$.edges').forEach((raw, i) => {
+    const path = `$.edges[${i}]`;
+    const edge = asRecord(raw, path);
+    const from = validateNodeId(edge.from, `${path}.from`);
+    const to = validateNodeId(edge.to, `${path}.to`);
+    asEnum(edge.edgeKind, EDGE_KINDS, `${path}.edgeKind`);
+    const evidence = asRecord(edge.evidence, `${path}.evidence`);
+    if (evidence.observed !== undefined) {
+      const observed = asRecord(evidence.observed, `${path}.evidence.observed`);
+      asEnum(observed.source, OBSERVATION_SOURCES, `${path}.evidence.observed.source`);
+    } else if (evidence.inferred !== undefined) {
+      const inferred = asRecord(evidence.inferred, `${path}.evidence.inferred`);
+      asNonEmptyString(inferred.reason, `${path}.evidence.inferred.reason`);
+    } else {
+      fail(`${path}.evidence`, 'expected {observed:{source}} or {inferred:{reason}}');
+    }
+    optional(asString, edge.detail, `${path}.detail`);
+    // No dangling edges: both endpoints must reference existing nodes.
+    if (!seenKeys.has(nodeIdKey(from))) {
+      fail(`${path}.from`, `references a node that does not exist (${nodeIdKey(from)})`);
+    }
+    if (!seenKeys.has(nodeIdKey(to))) {
+      fail(`${path}.to`, `references a node that does not exist (${nodeIdKey(to)})`);
+    }
+  });
+
+  return doc as unknown as TopologyDocument;
+}
+
 
 export interface TopologyFixture {
   name: string;
@@ -59,49 +233,23 @@ export function defaultTopology(): TopologyDocument {
 }
 
 // Validate and load an unknown JSON value as a TopologyDocument.
+//
+// WO-02 correction §8: the complete structure is validated — node ids and
+// shapes, edge structures and kinds, evidence discriminants, node-detail
+// nested addresses, MAC observation states, duplicate identifiers, and
+// dangling edge references (every edge endpoint must resolve to an
+// existing node).
 export function parseTopology(input: unknown): TopologyDocument {
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
-    throw new Error('invalid topology document: expected an object');
-  }
-  const doc = input as Record<string, unknown>;
-  const schema = doc.schemaVersion;
-  if (schema !== 1 && schema !== 2) {
-    throw new Error(
-      `invalid topology document: unsupported schemaVersion ${String(schema)} (expected 1 or 2; this build writes v2)`,
-    );
-  }
-  if (!Array.isArray(doc.nodes) || !Array.isArray(doc.edges)) {
-    throw new Error('invalid topology document: nodes and edges must be arrays');
-  }
-  for (const node of doc.nodes as Record<string, unknown>[]) {
-    if (typeof node.label !== 'string' || node.label.length === 0) {
-      throw new Error('invalid topology document: every node needs a label');
+  try {
+    return parseTopologyInner(input);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`invalid topology document ${error.message}`);
     }
-    const id = node.id as Record<string, unknown> | undefined;
-    if (!id || (!('interface' in id) && !('gateway' in id))) {
-      throw new Error(`invalid topology document: node ${String(node.label)} has no id`);
-    }
-    if (node.nodeKind !== 'interface' && node.nodeKind !== 'gateway') {
-      throw new Error(`invalid topology document: node ${String(node.label)} has an unknown kind`);
-    }
-    // MAC observation in node details follows the same v2 rule as
-    // snapshots: address string or sentinels, never null.
-    const detail = node.detail as Record<string, unknown> | undefined;
-    if (detail !== undefined) {
-      if (detail.macAddress === null || detail.macAddress === undefined) {
-        throw new Error(
-          `invalid topology document: node ${String(node.label)} detail.macAddress must not be null/absent — v1 null was ambiguous between "observed no hardware address" and "not observed"`,
-        );
-      }
-      if (!isMacObservation(detail.macAddress)) {
-        throw new Error(
-          `invalid topology document: node ${String(node.label)} detail.macAddress is not a hardware address or the sentinels 'absent'/'notObserved'`,
-        );
-      }
-    }
+    throw error;
   }
-  return doc as unknown as TopologyDocument;
 }
+
 
 // Stable string key for a NodeId (used for selection and cytoscape ids).
 export function nodeIdKey(id: NodeId): string {
