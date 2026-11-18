@@ -6,7 +6,9 @@ test('topology view renders the projected graph with legend', async ({ page }) =
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(String(error)));
 
-  await page.goto('/');
+  // The inspection hook requires the explicit test-hooks parameter (see
+  // TopologyView.svelte) — the production build exposes nothing without it.
+  await page.goto('/?araiguma-test-hooks');
   await page.getByTestId('nav-topology').click();
 
   const canvas = page.getByTestId('topology-canvas');
@@ -153,7 +155,6 @@ test('route details expose flags, notes, sources, and limitations', async ({ pag
 test('provider status view reports both providers honestly', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('nav-providers').click();
-
   const netlink = page.getByTestId('provider-netlink');
   const sysfs = page.getByTestId('provider-sysfs');
   await expect(netlink).toBeVisible();
@@ -179,4 +180,31 @@ test('overview still works after navigation', async ({ page }) => {
   await page.getByTestId('nav-overview').click();
   await expect(page.getByTestId('iface-card-wlp3s0')).toBeVisible();
   await expect(page.getByTestId('mock-badge')).toBeVisible();
+});
+
+test('test instrumentation is inert in the production build', async ({ page }) => {
+  // WO-02 correction §9.3: the topology test hook is gated behind
+  // development mode or the explicit ?araiguma-test-hooks parameter. A
+  // plain visit of the production build must not expose it, and navigating
+  // away must never leave a stale global behind.
+  await page.goto('/?araiguma-test-hooks');
+  await page.getByTestId('nav-topology').click();
+  const exposed = await page.evaluate(
+    () => (window as unknown as Record<string, unknown>).__araigumaTopology !== undefined,
+  );
+  expect(exposed).toBe(true);
+  // Leaving the view removes the global entirely.
+  await page.getByTestId('nav-overview').click();
+  const stale = await page.evaluate(
+    () => (window as unknown as Record<string, unknown>).__araigumaTopology !== undefined,
+  );
+  expect(stale).toBe(false);
+
+  // A normal visit (no parameter) never gets the hook at all.
+  await page.goto('/');
+  await page.getByTestId('nav-topology').click();
+  const plain = await page.evaluate(
+    () => (window as unknown as Record<string, unknown>).__araigumaTopology !== undefined,
+  );
+  expect(plain).toBe(false);
 });

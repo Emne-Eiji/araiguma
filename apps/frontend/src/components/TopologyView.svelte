@@ -21,6 +21,19 @@
   let container = $state<HTMLDivElement>();
   let cy: cytoscape.Core | null = null;
 
+  // Test/inspection hook (read-only counts + deterministic selection,
+  // which invokes exactly the same callback as a canvas click). Exposed
+  // ONLY in development or when the page is explicitly opened with the
+  // ?araiguma-test-hooks parameter (used by the e2e suite against the
+  // production build) — a normal visitor of the production build never
+  // gets test instrumentation on window. The global is removed when the
+  // component is destroyed, so no stale reference outlives the view.
+  const TEST_HOOK_PARAM = 'araiguma-test-hooks';
+  const testHooksEnabled =
+    import.meta.env.DEV ||
+    (typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).has(TEST_HOOK_PARAM));
+
   // Convert the document to cytoscape elements.
   function elements(doc: TopologyDocument): cytoscape.ElementDefinition[] {
     const nodes: cytoscape.ElementDefinition[] = doc.nodes.map((node) => ({
@@ -136,20 +149,25 @@
       const node = document.nodes.find((n) => nodeIdKey(n.id) === id);
       if (node && onselect) onselect(node);
     });
-    // Test/inspection hook (read-only counts + deterministic selection,
-    // which invokes exactly the same callback as a canvas click).
-    (window as unknown as Record<string, unknown>).__araigumaTopology = {
-      nodeCount: document.nodes.length,
-      edgeCount: document.edges.length,
-      nodeLabels: document.nodes.map((n) => n.label),
-      selectNode: (label: string) => {
-        const node = document.nodes.find((n) => n.label === label);
-        if (node && onselect) onselect(node);
-      },
-    };
+    // Test/inspection hook — see testHooksEnabled above.
+    if (testHooksEnabled) {
+      (window as unknown as Record<string, unknown>).__araigumaTopology = {
+        nodeCount: document.nodes.length,
+        edgeCount: document.edges.length,
+        nodeLabels: document.nodes.map((n) => n.label),
+        selectNode: (label: string) => {
+          const node = document.nodes.find((n) => n.label === label);
+          if (node && onselect) onselect(node);
+        },
+      };
+    }
     return () => {
       cy?.destroy();
       cy = null;
+      // Never leave a stale global behind after the component unmounts.
+      if (testHooksEnabled) {
+        delete (window as unknown as Record<string, unknown>).__araigumaTopology;
+      }
     };
   });
 
