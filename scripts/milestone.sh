@@ -48,11 +48,11 @@ git bundle create "$BUNDLE" --all
 git archive --format=tar.gz --prefix="araiguma/" -o "$TARBALL" HEAD
 {
   echo "# araiguma recovery manifest — $NAME"
-  echo "commit: $COMMIT"
-  echo "branch: $branch"
-  echo "commits: $(git rev-list --count HEAD)"
-  echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo "identity: Emne <https://github.com/Emne-Eiji> (author and committer, all commits)"
+  echo "# commit: $COMMIT"
+  echo "# branch: $branch"
+  echo "# commits: $(git rev-list --count HEAD)"
+  echo "# date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "# identity: Emne <https://github.com/Emne-Eiji> (author and committer, all commits)"
   echo
   (cd "$OUT" && sha256sum "$(basename "$BUNDLE")" "$(basename "$TARBALL")")
 } > "$SHAFILE"
