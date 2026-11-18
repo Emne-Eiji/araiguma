@@ -19,9 +19,23 @@ use araiguma_netlink::{Monitor, NetlinkProvider, Signal};
 
 /// Re-exec the test binary inside a fresh netns, or return when already
 /// inside one.
-fn ensure_netns(test: &str) {
+///
+/// Pattern (WO-02 correction §9.5). Returns `true` inside the re-exec'd
+/// child (run the real test body); `false` in the parent — where the child
+/// has already run inside its own transient namespace and its exit status
+/// has been ASSERTED, so the caller must skip the body immediately:
+///
+///     if !ensure_netns("my_test") { return; }
+///
+/// This replaces the previous pattern, which called `process::exit` after
+/// the first child completed: it orphaned sibling children (their results
+/// were never checked — a failing test could be silently swallowed) and
+/// prevented the harness from printing a proper summary. The guard keeps
+/// the safety property (a body never runs outside a namespace) while every
+/// child's result is asserted and accounted.
+fn ensure_netns(test: &str) -> bool {
     if std::env::var("ARIGUMA_NETNS_ACTIVE").is_ok() {
-        return;
+        return true;
     }
     let exe = std::env::current_exe().expect("test binary path");
     let status = Command::new("unshare")
@@ -31,7 +45,11 @@ fn ensure_netns(test: &str) {
         .env("ARIGUMA_NETNS_ACTIVE", "1")
         .status()
         .expect("unshare must be available for netns integration tests");
-    std::process::exit(status.code().unwrap_or(1));
+    assert!(
+        status.success(),
+        "netns child for {test} failed with {status}; its output is above"
+    );
+    false
 }
 
 /// Run `ip` inside the test namespace; panic with stderr on failure.
@@ -66,7 +84,9 @@ async fn wait_for_kind(monitor: &mut Monitor, wanted: &str) {
 
 #[tokio::test]
 async fn netns_dump_observes_dummy_addresses_and_routes() {
-    ensure_netns("netns_dump_observes_dummy_addresses_and_routes");
+    if !ensure_netns("netns_dump_observes_dummy_addresses_and_routes") {
+        return; // parent: the child already ran and was asserted
+    }
 
     // Test setup inside the isolated namespace (never the host).
     ip(&["link", "set", "lo", "up"]);
@@ -169,11 +189,21 @@ async fn netns_dump_observes_dummy_addresses_and_routes() {
 
 #[tokio::test]
 async fn netns_monitor_detects_changes_and_resynchronizes() {
-    ensure_netns("netns_monitor_detects_changes_and_resynchronizes");
+    if !ensure_netns("netns_monitor_detects_changes_and_resynchronizes") {
+        return; // parent: the child already ran and was asserted
+    }
 
     let mut monitor = Monitor::start().expect("multicast socket inside netns");
 
     ip(&["link", "add", "ar-mon0", "type", "dummy"]);
+    // Bring the link up BEFORE assigning the address: this kernel does not
+    // install the connected route for an address on a DOWN interface, so
+    // the default route via 192.0.2.1 below would be rejected with
+    // "Nexthop has invalid gateway". (This test's failure was hidden for
+    // the entire WO-02 cycle by the old re-exec pattern, which orphaned
+    // this child and never checked its exit status — the 52-vs-53 test
+    // count reconciliation exposed it.)
+    ip(&["link", "set", "ar-mon0", "up"]);
     wait_for_kind(&mut monitor, "newLink").await;
 
     ip(&["address", "add", "192.0.2.20/24", "dev", "ar-mon0"]);
@@ -206,11 +236,61 @@ async fn netns_monitor_detects_changes_and_resynchronizes() {
 }
 
 #[tokio::test]
+async fn netns_monitor_recovers_from_receive_buffer_overrun() {
+    // WO-02 correction §9.5: a PRACTICAL socket failure. The kernel drops
+    // netlink notifications (ENOBUFS → NLMSG_OVERRUN) once the socket's
+    // receive queue is full. Inside this transient namespace we starve the
+    // monitor's reader (the synchronous ip batch below occupies the test's
+    // single-threaded runtime, so the connection task cannot drain the
+    // socket) while a large batch of link add/remove operations floods the
+    // queue far beyond its default ~212 KiB. The host network namespace is
+    // never touched.
+    if !ensure_netns("netns_monitor_recovers_from_receive_buffer_overrun") {
+        return; // parent: the child already ran and was asserted
+    }
+
+    let mut monitor = Monitor::start().expect("multicast socket inside netns");
+
+    // ~2000 add/remove pairs generate several times more notifications
+    // than the receive buffer can hold.
+    let batch = std::env::temp_dir().join(format!("araiguma-flood-{}.batch", std::process::id()));
+    let mut lines = String::new();
+    for i in 0..2000 {
+        lines.push_str(&format!("link add ar-flood-{i} type dummy\n"));
+        lines.push_str(&format!("link del ar-flood-{i}\n"));
+    }
+    std::fs::write(&batch, lines).expect("write batch");
+    ip(&["-batch", batch.to_str().expect("utf8 path")]);
+
+    // The overrun must surface as Resynchronized — dropped events are
+    // unobserved, and the monitor never claims the stream is current.
+    let signal = tokio::time::timeout(Duration::from_secs(10), monitor.next_signal())
+        .await
+        .expect("a signal after the flood");
+    assert_eq!(
+        signal,
+        Signal::Resynchronized,
+        "buffer overrun must resynchronize, not pretend completeness"
+    );
+
+    // Drain whatever else the kernel buffered during the flood, then prove
+    // the subscription still delivers FRESH events afterwards.
+    let drain_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while let Ok(_stale) = tokio::time::timeout_at(drain_deadline, monitor.next_signal()).await {
+        // Discard buffered notifications; the loop ends at the quiet window.
+    }
+    ip(&["link", "add", "ar-after-flood", "type", "dummy"]);
+    wait_for_kind(&mut monitor, "newLink").await;
+}
+
+#[tokio::test]
 async fn netns_merge_with_sysfs_fallback() {
     use araiguma_core::merge::merge;
     use araiguma_sysfs::SysFsProvider;
 
-    ensure_netns("netns_merge_with_sysfs_fallback");
+    if !ensure_netns("netns_merge_with_sysfs_fallback") {
+        return; // parent: the child already ran and was asserted
+    }
 
     ip(&["link", "add", "ar-both0", "type", "dummy"]);
     ip(&["link", "set", "ar-both0", "up"]);

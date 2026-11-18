@@ -6,6 +6,10 @@
 //! reconnects with exponential backoff and reports
 //! [`Signal::Resynchronized`], telling consumers to re-dump state instead of
 //! trusting an event stream that may have missed changes while offline.
+//! The same signal is reported when the kernel DROPS notifications because
+//! our receive buffer overflowed (ENOBUFS, surfaced by the netlink codec as
+//! an `NLMSG_OVERRUN` message): dropped events are unobserved, and the
+//! monitor never lets the stream pretend it is current.
 
 use std::time::Duration;
 
@@ -37,9 +41,12 @@ pub enum Signal {
     /// ...). Notifications that do not map to a relevant change are
     /// filtered out internally and never surface here.
     Changed { kind: &'static str },
-    /// The subscription was re-established after a connection failure (or a
-    /// forced resynchronization). Changes that happened while disconnected
-    /// were NOT observed; consumers must re-dump state.
+    /// The observation stream cannot be trusted to be complete right now:
+    /// either the connection died and was re-established, or the kernel
+    /// DROPPED notifications because our receive buffer overflowed
+    /// (ENOBUFS → NLMSG_OVERRUN). Changes that happened in between were
+    /// NOT observed; consumers must re-dump state — never claim their
+    /// current observations are fresh.
     Resynchronized,
 }
 
@@ -74,7 +81,8 @@ impl Monitor {
 
     /// Wait for the next relevant signal. Reconnects (with exponential
     /// backoff) whenever the connection dies, and reports
-    /// [`Signal::Resynchronized`] after doing so.
+    /// [`Signal::Resynchronized`] after doing so — and also when the kernel
+    /// reports a receive-buffer overrun (dropped notifications).
     pub async fn next_signal(&mut self) -> Signal {
         loop {
             let Some(receiver) = self.receiver.as_mut() else {
@@ -82,14 +90,24 @@ impl Monitor {
                 return Signal::Resynchronized;
             };
             match receiver.next().await {
-                Some((message, _addr)) => {
-                    if let NetlinkPayload::InnerMessage(inner) = message.payload {
+                Some((message, _addr)) => match message.payload {
+                    NetlinkPayload::InnerMessage(inner) => {
                         if let Some(kind) = classify_notification(&inner) {
                             return Signal::Changed { kind };
                         }
+                        // ACKs and unclassified messages keep us listening.
                     }
-                    // ACKs and unclassified messages keep us listening.
-                }
+                    // The kernel dropped notifications because our receive
+                    // buffer overflowed (the netlink codec surfaces ENOBUFS
+                    // as an NLMSG_OVERRUN message) — the events that
+                    // overflowed were NOT observed. Report Resynchronized so
+                    // consumers re-dump state; the stream must never pretend
+                    // it is current.
+                    NetlinkPayload::Overrun(_) => return Signal::Resynchronized,
+                    _ => {
+                        // ACKs, errors, and other payloads keep us listening.
+                    }
+                },
                 None => {
                     // The connection task died: channel closed.
                     self.receiver = None;
@@ -127,5 +145,80 @@ impl Monitor {
         // Dropping the receiver closes the channel; the connection task
         // observes the closed channel and terminates.
         self.receiver = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::channel::mpsc;
+
+    /// A monitor wired to a synthetic channel, so message classification
+    /// (including the ENOBUFS overrun path) is unit-testable without a
+    /// socket. The channel's messages flow through the same
+    /// [`Monitor::next_signal`] logic as real ones.
+    fn monitor_with_receiver(
+        receiver: UnboundedReceiver<(NetlinkMessage<RouteNetlinkMessage>, SocketAddr)>,
+    ) -> Monitor {
+        Monitor {
+            groups: Vec::new(),
+            receiver: Some(receiver),
+            backoff: INITIAL_BACKOFF,
+        }
+    }
+
+    fn overrun_message() -> NetlinkMessage<RouteNetlinkMessage> {
+        NetlinkMessage::new(
+            rtnetlink::packet_core::NetlinkHeader::default(),
+            NetlinkPayload::Overrun(Vec::new()),
+        )
+    }
+
+    fn inner_message() -> NetlinkMessage<RouteNetlinkMessage> {
+        NetlinkMessage::new(
+            rtnetlink::packet_core::NetlinkHeader::default(),
+            NetlinkPayload::InnerMessage(rtnetlink::packet_route::RouteNetlinkMessage::NewLink(
+                netlink_packet_route::link::LinkMessage::default(),
+            )),
+        )
+    }
+
+    #[tokio::test]
+    async fn overrun_reports_resynchronized() {
+        let (sender, receiver) = mpsc::unbounded();
+        sender
+            .unbounded_send((overrun_message(), SocketAddr::new(0, 0)))
+            .expect("send");
+        drop(sender);
+        let mut monitor = monitor_with_receiver(receiver);
+        assert_eq!(monitor.next_signal().await, Signal::Resynchronized);
+    }
+
+    #[tokio::test]
+    async fn classified_inner_messages_still_report_changes() {
+        let (sender, receiver) = mpsc::unbounded();
+        sender
+            .unbounded_send((inner_message(), SocketAddr::new(0, 0)))
+            .expect("send");
+        drop(sender);
+        let mut monitor = monitor_with_receiver(receiver);
+        assert_eq!(
+            monitor.next_signal().await,
+            Signal::Changed { kind: "newLink" }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_closed_channel_reports_resynchronized() {
+        // Drop the sender: next_signal must detect the dead connection,
+        // reconnect (a real socket is created and immediately usable in
+        // the test environment), and report Resynchronized.
+        let (sender, receiver) = mpsc::unbounded();
+        let mut monitor = monitor_with_receiver(receiver);
+        drop(sender);
+        let signal = tokio::time::timeout(Duration::from_secs(5), monitor.next_signal())
+            .await
+            .expect("resynchronization within 5 seconds");
+        assert_eq!(signal, Signal::Resynchronized);
     }
 }
