@@ -9,11 +9,12 @@ a strictly read-only observer: it never changes addresses, routes, DNS, VPN,
 or firewall state, requires no privileges or daemons, and reports the
 environment as it is — including what it *could not* observe.
 
-> **Status:** WO-01R foundation reconstructed and validated (see below).
-> Network topology, main-table route presentation, and provider status
-> follow under WO-02. The original WO-01 repository was lost to a sandbox
-> persistence incident on 2026-11-18 and was rebuilt under a fresh history —
-> see `docs/incident-2026-11-18-repository-loss.md`.
+> **Status:** WO-01R foundation reconstructed and validated; WO-02
+> (topology, main-table route presentation, provider status) implemented
+> and validated. See `docs/work-orders/wo-01r-wo-02-closeout.md`. The
+> original WO-01 repository was lost to a sandbox persistence incident on
+> 2026-11-18 and was rebuilt under a fresh history — see
+> `docs/incident-2026-11-18-repository-loss.md`.
 
 ## What exists today
 
@@ -31,9 +32,16 @@ environment as it is — including what it *could not* observe.
 - **CLI** (`crates/cli`): `araiguma snapshot [--pretty]` and
   `araiguma watch` (NDJSON events).
 - **Frontend** (`apps/frontend`): Svelte 5 + TypeScript + Vite; dark design
-  system, 56 px icon rail, ≥96% central workspace, overlay details panel,
-  persistent MOCK DATA badge. Today it renders clearly-labeled synthetic
+  system, 56 px icon rail, ≥96% central workspace, overlay details panels,
+  persistent MOCK DATA badge. Views: interface overview, interactive
+  topology (Cytoscape, evidence-driven), main-table routes with an explicit
+  table filter, provider status. Today it renders clearly-labeled synthetic
   fixtures that are schema-locked against the Rust model from both sides.
+- **Topology projection** (`crates/core::topology` + `araiguma topology`):
+  a pure, deterministic projection of a snapshot into nodes and edges that
+  exist only with evidence — observed vs inferred relations distinguished,
+  unknown relationships stay unknown, and no internet/upstream nodes are
+  ever invented.
 
 ## Quick start
 
@@ -46,6 +54,8 @@ source scripts/env.sh
 ```sh
 araiguma snapshot --pretty    # one merged observation (JSON)
 araiguma watch                # live change events (NDJSON)
+araiguma topology --input snapshot.json
+                              # project a snapshot into a topology document
 ```
 
 ## Principles
