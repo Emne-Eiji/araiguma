@@ -1,0 +1,20 @@
+# Rust build artifacts (builds use CARGO_TARGET_DIR=/tmp/araiguma-target,
+# but keep the canonical locations ignored as well)
+/target/
+**/*.rs.bk
+
+# Cargo.lock IS committed: dependency resolution must stay reproducible.
+
+# Frontend
+node_modules/
+apps/frontend/dist/
+apps/frontend/.vite/
+coverage/
+*.tsbuildinfo
+
+# Environment / secrets
+.env
+.env.*
+
+# OS / editor noise
+.DS_Store

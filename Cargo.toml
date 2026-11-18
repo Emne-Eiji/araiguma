@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.100.0"
+
+# Dependency versions are pinned exactly (WO-01R: "pinned dependencies and a
+# committed Cargo.lock"). The pinned set deliberately matches the crate
+# archive cache that survived the 2026-11-18 persistence incident, so a
+# warm sandbox rebuilds fully offline if the network is unavailable.
+[workspace.dependencies]
+araiguma-core = { path = "crates/core" }
+araiguma-sysfs = { path = "crates/sysfs" }
+araiguma-netlink = { path = "crates/netlink" }
+
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+thiserror = "=2.0.21"
+log = "=0.4.35"
+async-trait = "=0.1.92"
+
+rtnetlink = "=0.24.0"
+netlink-packet-route = "=0.34.0"
+netlink-sys = "=0.9.0"
+netlink-packet-core = "=0.9.0"
+netlink-proto = "=0.14.1"
+
+futures = "=0.3.34"
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "time", "sync", "signal"] }
+
+[profile.release]
+lto = "thin"
