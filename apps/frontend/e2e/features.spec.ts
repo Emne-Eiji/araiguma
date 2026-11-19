@@ -346,3 +346,55 @@ test('import workflow: noted observations are marked and explained in the routes
   const tableCell = v6row.locator('td').last();
   await expect(tableCell).toHaveText('—', { useInnerText: true });
 });
+
+test('import workflow: a selected route never survives as stale details (WO-03-F / AUD-09)', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  // Select a route from the mock workstation snapshot and open its
+  // details panel.
+  await page.getByTestId('nav-routes').click();
+  const firstRow = page.locator('[data-testid="route-row"]').first();
+  await firstRow.click();
+  const details = page.getByTestId('route-details');
+  await expect(details).toBeVisible();
+
+  // Import a snapshot whose routes differ from the selected one (the
+  // server-tunnel fixture observes different routes).
+  await page.getByTestId('import-file-input').setInputFiles({
+    name: 'other-observation.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(serverTunnelSnapshot)),
+  });
+  await expect(page.getByTestId('imported-badge')).toBeVisible();
+
+  // The stale selection is gone: the details panel of a route that is not
+  // part of the new observation must never keep rendering.
+  await expect(details).toHaveCount(0);
+
+  // Selecting again from the new document works normally.
+  const newFirstRow = page.locator('[data-testid="route-row"]').first();
+  if ((await newFirstRow.count()) > 0) {
+    await newFirstRow.click();
+    await expect(page.getByTestId('route-details')).toBeVisible();
+  }
+
+  // Import the ORIGINAL workstation snapshot again and re-select a route;
+  // importing the server-tunnel snapshot once more must clear it again
+  // (the re-resolution happens on EVERY document change, not just once).
+  await page.getByTestId('import-file-input').setInputFiles({
+    name: 'workstation-again.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(workstationSnapshot)),
+  });
+  await expect(page.getByTestId('imported-badge')).toBeVisible();
+  await page.locator('[data-testid="route-row"]').first().click();
+  await expect(page.getByTestId('route-details')).toBeVisible();
+  await page.getByTestId('import-file-input').setInputFiles({
+    name: 'other-observation-2.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(serverTunnelSnapshot)),
+  });
+  await expect(page.getByTestId('route-details')).toHaveCount(0);
+});

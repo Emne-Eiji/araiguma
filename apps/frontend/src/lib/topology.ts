@@ -156,7 +156,7 @@ function parseTopologyInner(input: unknown): TopologyDocument {
   if (schema !== 1 && schema !== 2 && schema !== 3) {
     fail(
       '$.schemaVersion',
-      `unsupported schemaVersion ${String(schema)} (expected 1 or 2; this build writes v2)`,
+      `unsupported schemaVersion ${String(schema)} (expected 1, 2, or 3; this build writes v3)`,
     );
   }
   asInt(doc.sourceTimestampMs, '$.sourceTimestampMs', { min: 0 });
@@ -187,6 +187,16 @@ function parseTopologyInner(input: unknown): TopologyDocument {
       fail(`${path}.evidence`, 'expected {observed:{source}} or {inferred:{reason}}');
     }
     optional(asString, edge.detail, `${path}.detail`);
+    // No self-referential edges (WO-03-F / AUD-10): no legitimate
+    // projection output ever draws an edge from a node to itself — the
+    // generator annotates invalid self-references instead — so such an
+    // edge can only be a corrupted or hand-written document.
+    if (nodeIdKey(from) === nodeIdKey(to)) {
+      fail(
+        `${path}`,
+        `self-referential edge (${nodeIdKey(from)}) — no valid topology edge connects a node to itself`,
+      );
+    }
     // No dangling edges: both endpoints must reference existing nodes.
     if (!seenKeys.has(nodeIdKey(from))) {
       fail(`${path}.from`, `references a node that does not exist (${nodeIdKey(from)})`);

@@ -41,7 +41,7 @@
   // encoding (own family); a via-carrying hop is never on-link.
   function hopGatewayLabel(hop: NextHop): string {
     if (hop.gateway !== null) return formatGateway(hop.gateway);
-    if (hop.via !== null) return formatRouteVia(hop.via);
+    if (hop.via != null) return formatRouteVia(hop.via);
     return formatGateway(null);
   }
 
@@ -89,7 +89,7 @@
         <dt>Gateway</dt>
         {#if route.gateway !== null}
           <dd class="mono" title={undefined}>{formatGateway(route.gateway)}</dd>
-        {:else if route.via !== null}
+        {:else if route.via != null}
           <dd
             class="mono"
             title="the kernel encodes this next hop as RTA_VIA, with its own address family — this route is NOT on-link"

@@ -3,6 +3,7 @@ import { parseSnapshot } from '../src/lib/snapshot';
 import { parseTopology } from '../src/lib/topology';
 import type { NetworkSnapshot } from '../src/types';
 import workstation from '../../../fixtures/snapshots/workstation.json';
+import { isIpv6Address } from '../src/lib/validate';
 
 // WO-02 correction §8: the document boundary is validated completely.
 // These tests hammer both loaders with malformed documents of every
@@ -589,5 +590,92 @@ describe('empty provenance is rejected (WO-03-F / AUD-06)', () => {
     expect(() => parseSnapshot(noAddressSources)).toThrow(
       /addresses\[0\]\.sources: must name at least one provider/,
     );
+  });
+});
+
+describe('IPv6 validation covers the full grammar (WO-03-F / AUD-10, section 5.3)', () => {
+  it.each([
+    ['::1', true],
+    ['fe80::', true],
+    ['fe80::1', true],
+    ['2001:db8:9::2', true],
+    ['1:2:3:4:5:6:7:8', true],
+    ['::ffff:192.168.1.1', true],
+    ['1:2:3:4:5:6:1.2.3.4', true],
+    ['::', true],
+    ['1::', true],
+    ['::2', true],
+    // The audit's malformed examples.
+    [':::', false],
+    ['1:::2', false],
+    // Repeated compression.
+    ['::a::', false],
+    ['1::a::2', false],
+    // Group-count violations.
+    ['1:2:3:4:5:6:7', false],
+    ['1:2:3:4:5:6:7:8:9', false],
+    ['1:2:3:4:5:6:7::8', false],
+    ['a:b:c:d:e:f::1.2.3.4', false],
+    // Invalid group lengths and characters.
+    ['12345::', false],
+    ['::g', false],
+    ['2001:db8::zzzz', false],
+    // Leading/trailing stray colons.
+    [':1:2::', false],
+    ['1:2:3:4:5:6:7:8:', false],
+    [':', false],
+    // Zone identifiers are outside the document contract.
+    ['fe80::1%eth0', false],
+    ['fe80::1%1', false],
+  ])('isIpv6Address(%j) === %s', (value, expected) => {
+    expect(isIpv6Address(value)).toBe(expected);
+  });
+
+  it('a malformed IPv6 in a document is rejected with the location', () => {
+    const bad = snapshotWith((d) => {
+      (d.addresses as Array<Record<string, unknown>>)[0] = {
+        ...(d.addresses as Array<Record<string, unknown>>)[0],
+        family: 'ipv6',
+        address: ':::',
+        prefixLen: 128,
+      };
+    });
+    expect(() => parseSnapshot(bad)).toThrow(/addresses\[0\]\.address/);
+  });
+});
+
+describe('interface and topology structural rules (WO-03-F / AUD-10)', () => {
+  it('rejects duplicate interface ifindexes within one observation', () => {
+    const doc = snapshotWith((d) => {
+      const interfaces = d.interfaces as Array<Record<string, unknown>>;
+      interfaces[1] = { ...interfaces[1], ifindex: interfaces[0].ifindex };
+    });
+    expect(() => parseSnapshot(doc)).toThrow(
+      /interfaces\[1\]\.ifindex: duplicate ifindex/,
+    );
+  });
+
+  it('rejects self-referential topology edges', () => {
+    const selfEdge = {
+      from: { interface: { ifindex: 2 } },
+      to: { interface: { ifindex: 2 } },
+      edgeKind: 'vethPeer',
+      evidence: { observed: { source: 'netlink' } },
+      detail: 'self edge',
+    };
+    expect(() => parseTopology(topologyWith([baseNode], [selfEdge]))).toThrow(
+      /self-referential edge/,
+    );
+  });
+
+  it('the schema version message names the current version (v3)', () => {
+    const versioned = topologyWith([], []) as Record<string, unknown>;
+    versioned.schemaVersion = 7;
+    expect(() => parseTopology(versioned)).toThrow(
+      /expected 1, 2, or 3; this build writes v3/,
+    );
+    expect(() =>
+      parseSnapshot(snapshotWith((d) => { d.schemaVersion = 9; })),
+    ).toThrow(/expected 1, 2, or 3; this build writes v3/);
   });
 });

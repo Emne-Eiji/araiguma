@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Interface, Route, TopologyNode } from './types';
   import { routeHighlightTargets } from './lib/topology';
+  import { reResolveSelections } from './lib/selection';
   import {
     dataSource,
     currentSnapshot,
@@ -8,6 +9,7 @@
     snapshotImported,
     topologyImported,
   } from './lib/dataMode.svelte';
+  import { untrack } from 'svelte';
   import { formatObservationTime } from './lib/import';
   import NavRail from './components/NavRail.svelte';
   import OverviewView from './components/OverviewView.svelte';
@@ -45,11 +47,39 @@
 
   function navigate(next: string) {
     view = next as View;
-    // Panels belong to their views; switching closes stale overlays.
+    // Panels belong to their views; switching closes stale overlays. The
+    // route selection belongs to the routes view (and feeds the topology
+    // highlight) and is cleared with the others (WO-03-F / AUD-09).
     selectedInterface = null;
     selectedNode = null;
+    selectedRoute = null;
     importError = null;
   }
+
+  // WO-03-F / AUD-09: when the active documents change (import, or return
+  // to mock), every selection re-resolves against the NEW documents by
+  // identity — a selection that no longer resolves is cleared, never kept
+  // rendering as if it belonged to the current observation. The effect
+  // tracks only the generation counter; the selection reads are
+  // untracked so re-resolving cannot retrigger it.
+  $effect(() => {
+    const generation = dataSource.generation;
+    untrack(() => {
+      if (generation === 0) return; // initial mock documents: nothing selected yet
+      const resolved = reResolveSelections(
+        {
+          interface: selectedInterface,
+          node: selectedNode,
+          route: selectedRoute,
+        },
+        currentSnapshot(),
+        currentTopology(),
+      );
+      selectedInterface = resolved.interface;
+      selectedNode = resolved.node;
+      selectedRoute = resolved.route;
+    });
+  });
 
   // A view needs its document; in imported mode one may be missing when
   // only the other kind was imported. Mock mode always has both.

@@ -59,7 +59,15 @@ export function interfaceStateChip(iface: Interface): StateChip {
 
 // The three MAC observation states are distinct facts and must stay
 // distinguishable everywhere the value is displayed.
-const MAC_PATTERN = /^(?:[0-9a-f]{2}:)+[0-9a-f]{2}$/i;
+//
+// Contract (WO-03-F / AUD-12, identical to the Rust model's
+// `is_mac_shaped`): a hardware address is ONE OR MORE pairs of hex
+// digits separated by single colons, case-insensitive. Not every
+// link-layer address is a six-octet Ethernet MAC — the kernel exposes
+// longer hardware addresses (e.g. 20-byte IPoIB) — so any number of
+// pairs is valid and neither layer invents a minimum. A single pair
+// ("aa") is a structurally valid hardware address observation.
+const MAC_PATTERN = /^[0-9a-f]{2}(?::[0-9a-f]{2})*$/i;
 
 export function macObservationKind(value: MacObservation): MacObservationKind {
   if (value === 'absent') return 'absent';

@@ -179,7 +179,8 @@
                     title="the kernel sent RTA_MULTIPATH but it could not be decoded; the reason is in the details"
                   >{hopGatewayLabel(route)}</span>
                 {:else}
-                  <span title={route.gateway === null && route.via === null
+                  {@const via = route.via ?? null}
+                  <span title={route.gateway === null && via === null
                     ? 'the kernel reported no gateway for this route (on-link)'
                     : route.gateway === null
                       ? 'the kernel encodes this next hop as RTA_VIA (own address family) — not on-link'
@@ -187,8 +188,8 @@
                   >
                     {route.gateway !== null
                       ? formatGateway(route.gateway)
-                      : route.via !== null
-                        ? formatRouteVia(route.via)
+                      : via !== null
+                        ? formatRouteVia(via)
                         : formatGateway(null)}
                   </span>
                 {/if}

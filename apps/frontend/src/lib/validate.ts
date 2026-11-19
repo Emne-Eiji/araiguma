@@ -17,28 +17,59 @@ export function isIpv4Address(value: string): boolean {
 }
 
 export function isIpv6Address(value: string): boolean {
-  // Structural check mirroring what the Rust model emits and accepts:
-  // hex groups of 1-4 digits, optional single "::" compression, optional
-  // dotted-quad tail, no stray characters. (Full RFC 4291 canonicalization
-  // is the Rust side's job; this boundary rejects malformed shapes.)
-  if (!/^[0-9a-fA-F:.]+$/.test(value)) return false;
-  const doubleColonCount = (value.match(/::/g) ?? []).length;
-  if (doubleColonCount > 1) return false;
-  let head = value;
-  let tail: string | null = null;
-  const lastColon = value.lastIndexOf(':');
-  if (value.includes('.')) {
-    if (lastColon === -1) return false;
-    tail = value.slice(lastColon + 1);
-    head = value.slice(0, lastColon + 1); // keep the trailing colon for splitting
-    if (!isIpv4Address(tail)) return false;
+  // Complete RFC 4291 textual grammar (WO-03-F / AUD-10 + §5.3), matching
+  // what the Rust model (std Ipv6Addr) accepts and rejects — the previous
+  // hand-written check accepted malformed shapes such as ":::", "1:::2",
+  // ":1:2::" and "1:2:3:4:5:6:7:8:".
+  //
+  // Rules:
+  // * hex groups of 1-4 digits separated by single colons;
+  // * at most ONE "::" compression (which stands for one or more zero
+  //   groups), so with compression at most 7 explicit groups, without it
+  //   exactly 8 (an IPv4 dotted tail counts as two groups);
+  // * an IPv4 dotted tail is allowed only as the last group;
+  // * no leading or trailing single colon, no empty groups, no zone
+  //   identifiers ("::1%eth0" — the document contract has no zones; the
+  //   Rust model rejects them too), no stray characters.
+  if (value.length === 0 || /[^0-9a-fA-F:.]/.test(value)) return false;
+  const hasV4Tail = value.includes('.');
+  const firstCompression = value.indexOf('::');
+  const lastCompression = value.lastIndexOf('::');
+
+  // Validate one side of the address (a list of colon-separated groups,
+  // possibly ending in an IPv4 tail on the RIGHT side only).
+  const checkSide = (side: string, allowTail: boolean): { groups: number; ok: boolean } => {
+    if (side === '') return { groups: 0, ok: true };
+    if (side.startsWith(':') || side.endsWith(':')) return { groups: 0, ok: false };
+    const groups = side.split(':');
+    for (let i = 0; i < groups.length; i++) {
+      const group = groups[i];
+      if (group.includes('.')) {
+        // An IPv4 tail may appear only as the very last group of the
+        // whole address.
+        if (!allowTail || i !== groups.length - 1 || !isIpv4Address(group)) {
+          return { groups: 0, ok: false };
+        }
+      } else if (!/^[0-9a-fA-F]{1,4}$/.test(group)) {
+        return { groups: 0, ok: false };
+      }
+    }
+    return { groups: groups.length, ok: true };
+  };
+
+  if (firstCompression !== lastCompression) return false; // more than one "::"
+  if (firstCompression === -1) {
+    // No compression: all groups explicit; the tail counts as one group
+    // here (checkSide consumed it) but represents two.
+    const { groups, ok } = checkSide(value, hasV4Tail);
+    if (!ok) return false;
+    return groups + (hasV4Tail ? 1 : 0) === 8;
   }
-  const groups = head.split(':').filter((g) => g.length > 0);
-  const maxGroups = tail !== null ? 6 : 8;
-  if (groups.length > maxGroups) return false;
-  if (!groups.every((g) => /^[0-9a-fA-F]{1,4}$/.test(g))) return false;
-  if (doubleColonCount === 0 && groups.length !== maxGroups) return false;
-  return true;
+  // One "::": at most 7 explicit group-equivalents on both sides combined.
+  const left = checkSide(value.slice(0, firstCompression), false);
+  const right = checkSide(value.slice(firstCompression + 2), hasV4Tail);
+  if (!left.ok || !right.ok) return false;
+  return left.groups + right.groups + (hasV4Tail ? 1 : 0) <= 7;
 }
 
 export function isIpAddress(value: string): boolean {

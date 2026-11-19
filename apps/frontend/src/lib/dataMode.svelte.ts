@@ -28,12 +28,19 @@ export interface DataSourceState {
    *  replaced by an import. */
   snapshot: ImportedSnapshot | null;
   topology: ImportedTopology | null;
+  /** Monotonic counter, bumped on EVERY change of the rendered documents
+   *  (import or return to mock). Views re-resolve dependent selection
+   *  state against the new documents when it changes (WO-03-F / AUD-09:
+   *  selections from a previous document must never keep rendering as
+   *  if they belonged to the current one). */
+  generation: number;
 }
 
 export const dataSource = $state<DataSourceState>({
   mode: 'mock',
   snapshot: null,
   topology: null,
+  generation: 0,
 });
 
 /// The snapshot the snapshot-driven views render.
@@ -69,6 +76,10 @@ export function importFile(fileName: string, text: string): void {
     dataSource.topology = { document: documents.topology, fileName, importedAtMs };
   }
   dataSource.mode = 'imported';
+  // Atomically with the documents: a new generation invalidates every
+  // selection derived from the previous documents (they re-resolve or
+  // clear in the views; nothing stale keeps rendering).
+  dataSource.generation += 1;
 }
 
 /// Return to the synthetic demonstration data.
@@ -76,4 +87,5 @@ export function returnToMock(): void {
   dataSource.mode = 'mock';
   dataSource.snapshot = null;
   dataSource.topology = null;
+  dataSource.generation += 1;
 }

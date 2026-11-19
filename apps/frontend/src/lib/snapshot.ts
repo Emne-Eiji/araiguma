@@ -366,6 +366,23 @@ function parseSnapshotInner(input: unknown): NetworkSnapshot {
   asArray(root.interfaces, '$.interfaces').forEach((raw, i) => {
     validateInterface(raw, `$.interfaces[${i}]`);
   });
+  // Interface identity (WO-03-F / AUD-10): ifindex identifies an
+  // interface WITHIN one observation; duplicates would make every
+  // ifindex-keyed reference (masters, peers, routes, topology nodes)
+  // ambiguous, so the document is rejected instead of rendering
+  // arbitrary choices.
+  const seenIfindexes = new Map<number, string>();
+  asArray(root.interfaces, '$.interfaces').forEach((raw, i) => {
+    const ifindex = (raw as { ifindex: number }).ifindex;
+    const first = seenIfindexes.get(ifindex);
+    if (first !== undefined) {
+      fail(
+        `$.interfaces[${i}].ifindex`,
+        `duplicate ifindex ${ifindex} (first used by ${first}) — ifindex identifies an interface within one observation`,
+      );
+    }
+    seenIfindexes.set(ifindex, `$.interfaces[${i}]`);
+  });
   asArray(root.addresses, '$.addresses').forEach((raw, i) => {
     validateAddress(raw, `$.addresses[${i}]`);
   });

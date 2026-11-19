@@ -94,6 +94,39 @@ export function routeKey(route: Route, index: number): string {
   ].join('|');
 }
 
+// Route identity for re-resolving a selection against a NEW document
+// (WO-03-F / AUD-09): every field that distinguishes two observed routes
+// participates — the same rule the Rust diff uses. Provenance (sources,
+// notes) deliberately does NOT: selecting "the default route via X" keeps
+// pointing at that route when the document is re-imported, but a route
+// that is not present in the new document resolves to nothing and the
+// selection clears.
+export function sameRouteIdentity(a: Route, b: Route): boolean {
+  const destinationEquals =
+    a.destination === null && b.destination === null
+      ? true
+      : a.destination !== null &&
+        b.destination !== null &&
+        a.destination.address === b.destination.address &&
+        a.destination.prefixLen === b.destination.prefixLen;
+  return (
+    a.family === b.family &&
+    destinationEquals &&
+    a.gateway === b.gateway &&
+    JSON.stringify(a.via) === JSON.stringify(b.via) &&
+    a.outputInterface === b.outputInterface &&
+    a.outputInterfaceName === b.outputInterfaceName &&
+    JSON.stringify(a.protocol) === JSON.stringify(b.protocol) &&
+    JSON.stringify(a.scope) === JSON.stringify(b.scope) &&
+    JSON.stringify(a.routeType) === JSON.stringify(b.routeType) &&
+    a.metric === b.metric &&
+    a.table === b.table &&
+    a.tos === b.tos &&
+    JSON.stringify(a.flags) === JSON.stringify(b.flags) &&
+    JSON.stringify(a.nextHops) === JSON.stringify(b.nextHops)
+  );
+}
+
 // Accessible summary of a route row for screen readers and keyboard
 // navigation (WO-02 correction §9.4): the same facts the visual row shows,
 // plus a hint that observation notes exist when they do. Multipath rows
@@ -104,7 +137,8 @@ export function routeKey(route: Route, index: number): string {
 // own address family) is the next hop.
 export function nextHopLabel(route: Route): string {
   if (route.gateway !== null) return `via ${route.gateway}`;
-  if (route.via !== null) return `via ${formatRouteVia(route.via)}`;
+  // `!= null` also covers `undefined` from pre-WO-03-F documents.
+  if (route.via != null) return `via ${formatRouteVia(route.via)}`;
   return 'on-link';
 }
 
