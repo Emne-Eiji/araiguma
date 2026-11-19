@@ -143,9 +143,28 @@ pub fn parse_route_line(line: &str) -> Option<RouteEntry> {
     })
 }
 
-/// Prefix length from a `/proc/net/route` netmask.
-pub fn prefix_len_from_mask(mask: Ipv4Addr) -> u8 {
-    u32::from(mask).leading_ones() as u8
+/// Prefix length from a `/proc/net/route` netmask — ONLY for contiguous
+/// masks (1-bits followed by 0-bits). A non-contiguous mask such as
+/// `255.0.255.0` is NOT a prefix encoding; silently treating it as one
+/// would fabricate a different network (WO-03-F / AUD-08), so it yields
+/// `None` and the row is reported through the parse diagnostics instead.
+pub fn prefix_len_from_mask(mask: Ipv4Addr) -> Option<u8> {
+    let raw = u32::from(mask);
+    // A contiguous mask is 1-bits followed by 0-bits. Such a value with
+    // `n` set bits is EXACTLY `u32::MAX << (32 - n)`; anything else —
+    // e.g. 255.0.255.0, or a zero bit with ones below it — is not a
+    // prefix encoding and must not be silently normalized into a
+    // different valid network.
+    let ones = raw.count_ones();
+    let contiguous = if ones == 0 {
+        raw == 0
+    } else {
+        raw == u32::MAX << (32 - ones)
+    };
+    if !contiguous {
+        return None;
+    }
+    Some(ones as u8)
 }
 
 /// One `/proc/net/ipv6_route` line. Format (verified live against kernel
@@ -283,17 +302,55 @@ mod tests {
         );
         assert_eq!(entry.gateway, Some("192.168.0.1".parse().unwrap()));
         assert_eq!(entry.metric, 600);
-        assert_eq!(prefix_len_from_mask(entry.mask), 0);
+        assert_eq!(prefix_len_from_mask(entry.mask), Some(0));
 
         let connected =
             parse_route_line("eth0    0000A8C0        00000000        0001    0       0       0       00FFFFFF        0       0       0")
                 .expect("valid route line");
         assert_eq!(connected.gateway, None, "zero gateway means on-link");
-        assert_eq!(prefix_len_from_mask(connected.mask), 24);
+        assert_eq!(prefix_len_from_mask(connected.mask), Some(24));
         assert_eq!(
             connected.destination,
             "192.168.0.0".parse::<Ipv4Addr>().unwrap()
         );
+    }
+
+    #[test]
+    fn mask_contiguity_is_validated_not_normalized() {
+        // WO-03-F / AUD-08: only CONTIGUOUS masks are prefix encodings.
+        // Every /0../32 mask is valid.
+        for prefix in 0u8..=32 {
+            let mask = if prefix == 0 {
+                0u32
+            } else {
+                u32::MAX << (32 - prefix as u32)
+            };
+            assert_eq!(
+                prefix_len_from_mask(Ipv4Addr::from(mask)),
+                Some(prefix),
+                "/{prefix} mask is contiguous"
+            );
+        }
+        // Boundary bit patterns.
+        assert_eq!(prefix_len_from_mask(Ipv4Addr::from(0)), Some(0));
+        assert_eq!(prefix_len_from_mask(Ipv4Addr::from(u32::MAX)), Some(32));
+        assert_eq!(prefix_len_from_mask(Ipv4Addr::from(0x8000_0000)), Some(1));
+        assert_eq!(
+            prefix_len_from_mask(Ipv4Addr::from(0xFFFF_FFFE)),
+            Some(31),
+            "31 ones then a zero IS the contiguous /31 mask"
+        );
+        assert_eq!(
+            prefix_len_from_mask(Ipv4Addr::from(0xFFFF_FFFD)),
+            None,
+            "a zero bit with a one below it is non-contiguous"
+        );
+        // Non-contiguous masks are REJECTED, never silently normalized
+        // into a different valid network (the audit's 255.0.255.0 case).
+        assert_eq!(prefix_len_from_mask("255.0.255.0".parse().unwrap()), None);
+        assert_eq!(prefix_len_from_mask("255.255.0.255".parse().unwrap()), None);
+        assert_eq!(prefix_len_from_mask("0.255.255.255".parse().unwrap()), None);
+        assert_eq!(prefix_len_from_mask("128.0.0.1".parse().unwrap()), None);
     }
 
     #[test]

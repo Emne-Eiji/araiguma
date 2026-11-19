@@ -90,6 +90,39 @@ impl NetworkSnapshot {
         tables.dedup();
         tables
     }
+
+    /// Validate that every observation carries provenance (WO-03-F /
+    /// AUD-06). An observation with NO source is not a valid observation:
+    /// it cannot be traced to anything that actually supplied it, and
+    /// downstream presentation must never invent an attribution. Returns
+    /// the first offending location as a path-qualified error.
+    pub fn validate_provenance(&self) -> Result<(), String> {
+        for (index, interface) in self.interfaces.iter().enumerate() {
+            if interface.sources.is_empty() {
+                return Err(format!(
+                    "$.interfaces[{index}].sources is empty — every observation must name at \
+                     least one provider that actually supplied it"
+                ));
+            }
+        }
+        for (index, address) in self.addresses.iter().enumerate() {
+            if address.sources.is_empty() {
+                return Err(format!(
+                    "$.addresses[{index}].sources is empty — every observation must name at \
+                     least one provider that actually supplied it"
+                ));
+            }
+        }
+        for (index, route) in self.routes.iter().enumerate() {
+            if route.sources.is_empty() {
+                return Err(format!(
+                    "$.routes[{index}].sources is empty — every observation must name at \
+                     least one provider that actually supplied it"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A change between two snapshots (see [`diff_snapshots`]).

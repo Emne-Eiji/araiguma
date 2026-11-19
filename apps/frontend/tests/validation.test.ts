@@ -566,3 +566,28 @@ function baseRouteFixture() {
     notes: [],
   };
 }
+
+describe('empty provenance is rejected (WO-03-F / AUD-06)', () => {
+  it('rejects observations whose sources array is empty', () => {
+    const noRouteSources = snapshotWith((d) => {
+      (d.routes as Array<Record<string, unknown>>)[0].sources = [];
+    });
+    expect(() => parseSnapshot(noRouteSources)).toThrow(
+      /routes\[0\]\.sources: must name at least one provider/,
+    );
+
+    const noInterfaceSources = snapshotWith((d) => {
+      (d.interfaces as Array<Record<string, unknown>>)[0].sources = [];
+    });
+    expect(() => parseSnapshot(noInterfaceSources)).toThrow(
+      /interfaces\[0\]\.sources: must name at least one provider/,
+    );
+
+    const noAddressSources = snapshotWith((d) => {
+      (d.addresses as Array<Record<string, unknown>>)[0].sources = [];
+    });
+    expect(() => parseSnapshot(noAddressSources)).toThrow(
+      /addresses\[0\]\.sources: must name at least one provider/,
+    );
+  });
+});

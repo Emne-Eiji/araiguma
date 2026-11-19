@@ -218,6 +218,12 @@ pub fn project_snapshot_to_topology(input: Option<&str>) -> Result<TopologyDocum
     }
     let snapshot: NetworkSnapshot = serde_json::from_value(value)
         .map_err(|error| format!("invalid snapshot document: {error}"))?;
+    // Provenance contract (WO-03-F / AUD-06): an observation without a
+    // source is not a valid observation, and the projection refuses to
+    // invent one.
+    snapshot
+        .validate_provenance()
+        .map_err(|error| format!("invalid snapshot document: {error}"))?;
     Ok(build_topology(&snapshot))
 }
 
@@ -482,6 +488,31 @@ mod tests {
         assert!(
             error.contains("unsupported snapshot schemaVersion 99"),
             "rejection names the version: {error}"
+        );
+    }
+
+    #[test]
+    fn observations_without_provenance_are_rejected_at_the_boundary() {
+        // WO-03-F / AUD-06: an observation with an EMPTY source list is not a
+        // valid observation — nothing actually supplied it, and no attribution
+        // may be invented downstream. The projector rejects the document with
+        // a path-qualified reason instead of projecting fabricated provenance.
+        let document = legacy_document(3).replace(
+            r#""sources": ["netlink"], "notes": []
+        }],
+        "providers""#,
+            r#""sources": [], "notes": []
+        }],
+        "providers""#,
+        );
+        let error = project_tmp(&document).expect_err("empty provenance rejected");
+        assert!(
+            error.contains("$.routes[0].sources is empty"),
+            "the rejection names the offending location: {error}"
+        );
+        assert!(
+            error.contains("must name at least one provider"),
+            "the rejection explains the contract: {error}"
         );
     }
 }

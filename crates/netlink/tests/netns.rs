@@ -926,13 +926,24 @@ fn spawn_child_netns() -> std::process::Child {
         .arg("300")
         .spawn()
         .expect("spawn child netns");
-    // Wait until the child's netns link exists (it appears at exec time).
-    let netns = format!("/proc/{}/ns/net", child.id());
+    // Wait until the child's netns REALLY differs from ours: the
+    // /proc/<pid>/ns/net link exists from fork time and still names OUR
+    // namespace until the child's unshare(CLONE_NEWNET) has executed, so
+    // a bare existence check races under load (observed: nsenter then ran
+    // in the parent namespace and the setup landed in the wrong netns).
+    let child_netns = std::path::PathBuf::from(format!("/proc/{}/ns/net", child.id()));
+    let own_netns = std::fs::read_link("/proc/self/ns/net").expect("own netns link");
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while !std::path::Path::new(&netns).exists() {
+    loop {
+        match std::fs::read_link(&child_netns) {
+            // A different namespace: the child's unshare completed.
+            Ok(link) if link != own_netns => break,
+            // Same namespace or not yet readable: keep waiting.
+            _ => {}
+        }
         assert!(
             std::time::Instant::now() < deadline,
-            "child netns never appeared"
+            "child network namespace never separated from ours"
         );
         std::thread::sleep(Duration::from_millis(20));
     }

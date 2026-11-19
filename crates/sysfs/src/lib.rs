@@ -123,20 +123,33 @@ impl SysFsProvider {
     }
 
     /// Read IPv6 addresses from `<proc_root>/net/if_inet6`.
-    pub fn read_addresses_v6(&self) -> SectionResult<Address> {
+    ///
+    /// Lines that cannot be parsed are NOT silently dropped: the second
+    /// return value carries a diagnostic per rejected line (1-based line
+    /// number + reason; the raw line is deliberately not echoed — the
+    /// content is not needed to explain the limitation). An empty file is
+    /// a valid zero-address observation and produces no diagnostics
+    /// (WO-03-F / AUD-07: an empty parse and a partial parse are
+    /// distinguishable).
+    pub fn read_addresses_v6(&self) -> (SectionResult<Address>, Vec<String>) {
         let path = self.proc_root.join("net/if_inet6");
         let content = match std::fs::read_to_string(&path) {
             Ok(content) => content,
             Err(error) => {
-                return SectionResult::Failed(format!("cannot read {}: {error}", path.display()))
+                return (
+                    SectionResult::Failed(format!("cannot read {}: {error}", path.display())),
+                    Vec::new(),
+                )
             }
         };
         let mut addresses = Vec::new();
-        for line in content.lines() {
+        let mut rejected: Vec<String> = Vec::new();
+        for (index, line) in content.lines().enumerate() {
             if line.trim().is_empty() {
                 continue;
             }
             let Some(entry) = parse::parse_if_inet6_line(line) else {
+                rejected.push(format!("line {}: malformed if_inet6 row", index + 1));
                 continue;
             };
             addresses.push(Address {
@@ -150,36 +163,55 @@ impl SysFsProvider {
                 sources: vec![ObservationSource::ProcFs],
             });
         }
-        SectionResult::Observed(addresses)
+        (SectionResult::Observed(addresses), rejected)
     }
 
     /// Read main-table IPv4 routes from `<proc_root>/net/route`.
-    pub fn read_routes_v4(&self, name_to_ifindex: &HashMap<String, u32>) -> SectionResult<Route> {
+    ///
+    /// Rejected rows (malformed columns, non-contiguous netmasks — AUD-08)
+    /// produce a diagnostic instead of vanishing; see
+    /// [`Self::read_addresses_v6`] for the shape.
+    pub fn read_routes_v4(
+        &self,
+        name_to_ifindex: &HashMap<String, u32>,
+    ) -> (SectionResult<Route>, Vec<String>) {
         let path = self.proc_root.join("net/route");
         let content = match std::fs::read_to_string(&path) {
             Ok(content) => content,
             Err(error) => {
-                return SectionResult::Failed(format!("cannot read {}: {error}", path.display()))
+                return (
+                    SectionResult::Failed(format!("cannot read {}: {error}", path.display())),
+                    Vec::new(),
+                )
             }
         };
         let mut routes = Vec::new();
-        for line in content.lines() {
+        let mut rejected: Vec<String> = Vec::new();
+        for (index, line) in content.lines().enumerate() {
             if line.trim().is_empty() || parse::is_route_header(line) {
                 continue;
             }
             let Some(entry) = parse::parse_route_line(line) else {
+                rejected.push(format!("line {}: malformed route row", index + 1));
+                continue;
+            };
+            // A non-contiguous netmask is not a prefix encoding (AUD-08):
+            // the row is rejected with the reason instead of being silently
+            // normalized into a DIFFERENT valid network.
+            let Some(prefix_len) = parse::prefix_len_from_mask(entry.mask) else {
+                rejected.push(format!(
+                    "line {}: non-contiguous netmask {} is not a prefix encoding",
+                    index + 1,
+                    entry.mask
+                ));
                 continue;
             };
             routes.push(Route {
                 family: AddressFamily::Ipv4,
-                destination: Some(IpNet::new(
-                    IpAddr::V4(entry.destination),
-                    parse::prefix_len_from_mask(entry.mask),
-                )),
+                destination: Some(IpNet::new(IpAddr::V4(entry.destination), prefix_len)),
                 // Gateway None here means the kernel reported no gateway
                 // (on-link) — an observed absence.
                 gateway: entry.gateway.map(IpAddr::V4),
-                // procfs exposes no RTA_VIA encoding.
                 via: None,
                 output_interface: name_to_ifindex.get(&entry.iface).copied(),
                 output_interface_name: Some(entry.iface),
@@ -196,7 +228,7 @@ impl SysFsProvider {
                 notes: vec![NOTE_TABLE_IMPLIED.to_string()],
             });
         }
-        SectionResult::Observed(routes)
+        (SectionResult::Observed(routes), rejected)
     }
 
     /// Read IPv6 routes from `<proc_root>/net/ipv6_route` (WO-03 M4).
@@ -208,21 +240,30 @@ impl SysFsProvider {
     /// an invented id — with a note. An all-zero nexthop is the kernel's
     /// observed "no gateway" (on-link) encoding. A missing file is a
     /// `Failed` section ("cannot read"), NOT an observed "no IPv6 routes":
-    /// absence of the file is not evidence about the route table.
-    pub fn read_routes_v6(&self, name_to_ifindex: &HashMap<String, u32>) -> SectionResult<Route> {
+    /// absence of the file is not evidence about the route table. Rejected
+    /// rows produce diagnostics (WO-03-F / AUD-07).
+    pub fn read_routes_v6(
+        &self,
+        name_to_ifindex: &HashMap<String, u32>,
+    ) -> (SectionResult<Route>, Vec<String>) {
         let path = self.proc_root.join("net/ipv6_route");
         let content = match std::fs::read_to_string(&path) {
             Ok(content) => content,
             Err(error) => {
-                return SectionResult::Failed(format!("cannot read {}: {error}", path.display()))
+                return (
+                    SectionResult::Failed(format!("cannot read {}: {error}", path.display())),
+                    Vec::new(),
+                )
             }
         };
         let mut routes = Vec::new();
-        for line in content.lines() {
+        let mut rejected: Vec<String> = Vec::new();
+        for (index, line) in content.lines().enumerate() {
             if line.trim().is_empty() {
                 continue;
             }
             let Some(entry) = parse::parse_route_v6_line(line) else {
+                rejected.push(format!("line {}: malformed ipv6_route row", index + 1));
                 continue;
             };
             routes.push(Route {
@@ -231,7 +272,6 @@ impl SysFsProvider {
                 // Gateway None here means the kernel reported no gateway
                 // (on-link) — an observed absence, same as the v4 file.
                 gateway: entry.gateway.map(IpAddr::V6),
-                // procfs exposes no RTA_VIA encoding.
                 via: None,
                 output_interface: name_to_ifindex.get(&entry.iface).copied(),
                 output_interface_name: Some(entry.iface),
@@ -251,7 +291,7 @@ impl SysFsProvider {
                 notes: vec![NOTE_V6_ROUTE_LIMITS.to_string(), NOTE_V6_FLAGS.to_string()],
             });
         }
-        SectionResult::Observed(routes)
+        (SectionResult::Observed(routes), rejected)
     }
 }
 
@@ -360,9 +400,9 @@ impl DiscoveryProvider for SysFsProvider {
             }
             _ => HashMap::new(),
         };
-        let addresses_v6 = self.read_addresses_v6();
-        let routes_v4 = self.read_routes_v4(&name_to_ifindex);
-        let routes_v6 = self.read_routes_v6(&name_to_ifindex);
+        let (addresses_v6, rejected_addresses) = self.read_addresses_v6();
+        let (routes_v4, rejected_v4) = self.read_routes_v4(&name_to_ifindex);
+        let (routes_v6, rejected_v6) = self.read_routes_v6(&name_to_ifindex);
 
         let mut notes = vec![
             NOTE_CLASSIFICATION.to_string(),
@@ -375,6 +415,24 @@ impl DiscoveryProvider for SysFsProvider {
                 skipped.join(", ")
             ));
         }
+        // WO-03-F / AUD-07: a partial parse is visible. The file was read
+        // and some rows could not be represented — the user must never
+        // mistake that for a complete observation. (An empty file is a
+        // valid zero-item observation and produces no note.)
+        let mut summarize = |file: &str, rejected: &[String]| {
+            if rejected.is_empty() {
+                return;
+            }
+            let lines: Vec<&str> = rejected.iter().map(String::as_str).collect();
+            notes.push(format!(
+                "{file}: {} of its data rows could not be parsed and are NOT represented ({})",
+                rejected.len(),
+                lines.join("; ")
+            ));
+        };
+        summarize("/proc/net/if_inet6", &rejected_addresses);
+        summarize("/proc/net/route", &rejected_v4);
+        summarize("/proc/net/ipv6_route", &rejected_v6);
 
         ProviderObservation {
             provider: ProviderId::SysFs,

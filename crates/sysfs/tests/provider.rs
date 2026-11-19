@@ -415,3 +415,196 @@ fn mac_observation_three_states_from_sysfs() {
 
     std::fs::remove_dir_all(&tmp).ok();
 }
+
+// ---------------------------------------------------------------------------
+// WO-03-F / AUD-07: malformed procfs rows are visible diagnostics, never
+// silent disappearances. An empty file is a valid zero-item observation
+// (no note); a partially-parsed file says so.
+// ---------------------------------------------------------------------------
+
+/// Create a full proc root with the given file contents and return a
+/// provider rooted at it.
+fn temp_proc_root(files: &[(&str, &str)]) -> araiguma_sysfs::SysFsProvider {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let root = std::env::temp_dir().join(format!(
+        "araiguma-sysfs-aud07-{}-{serial}",
+        std::process::id()
+    ));
+    let net = root.join("net");
+    std::fs::create_dir_all(&net).expect("temp net dir");
+    for (name, content) in files {
+        std::fs::write(net.join(name), content).expect("temp file");
+    }
+    araiguma_sysfs::SysFsProvider::with_roots("/nonexistent-sys", &root)
+}
+
+#[test]
+fn empty_files_are_valid_zero_observations_without_notes() {
+    let mut provider = temp_proc_root(&[
+        ("if_inet6", ""),
+        ("route", "Iface        Destination     Gateway Flags   RefCnt  Use     Metric  Mask            MTU     Window  IRTT\n"),
+        ("ipv6_route", ""),
+    ]);
+    let observation = observe(&mut provider);
+    use araiguma_core::provider::SectionResult;
+    assert!(
+        matches!(observation.addresses_v6, SectionResult::Observed(ref items) if items.is_empty())
+    );
+    assert!(
+        matches!(observation.routes_v4, SectionResult::Observed(ref items) if items.is_empty())
+    );
+    assert!(
+        matches!(observation.routes_v6, SectionResult::Observed(ref items) if items.is_empty())
+    );
+    // An empty parse produces NO parse diagnostics — nothing was rejected.
+    assert!(
+        !observation
+            .notes
+            .iter()
+            .any(|n| n.contains("could not be parsed")),
+        "empty files are not partial parses: {:?}",
+        observation.notes
+    );
+}
+
+#[test]
+fn malformed_ipv6_route_rows_are_counted_and_noted() {
+    // Two valid rows and two malformed ones (garbage row, and a row with a
+    // non-hex prefix length). Both rejections must be visible; the valid
+    // rows still translate.
+    let mut provider = temp_proc_root(&[(
+        "ipv6_route",
+        "garbage that is not a route row\n\
+         00000000000000000000000000000001 80 00000000000000000000000000000000 00 00000000000000000000000000000000 00000000 00000004 00000000 80200001       lo\n\
+         fe800000000000000000000000000000 zz 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001     eth0\n\
+         fe800000000000000000000000000000 40 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001     eth0\n",
+    )]);
+    let observation = observe(&mut provider);
+    use araiguma_core::provider::SectionResult;
+    let SectionResult::Observed(routes) = observation.routes_v6 else {
+        panic!("section observed");
+    };
+    assert_eq!(routes.len(), 2, "the two valid rows translate");
+    let note = observation
+        .notes
+        .iter()
+        .find(|n| n.contains("/proc/net/ipv6_route") && n.contains("could not be parsed"))
+        .expect("the partial parse is visible")
+        .clone();
+    assert!(
+        note.contains("2 of its data rows could not be parsed"),
+        "{note}"
+    );
+    assert!(note.contains("line 1"), "{note}");
+    assert!(note.contains("line 3"), "{note}");
+    assert!(
+        !note.contains("garbage that"),
+        "raw rejected content is deliberately not echoed: {note}"
+    );
+}
+
+#[test]
+fn malformed_if_inet6_and_route_rows_are_noted_separately() {
+    let mut provider = temp_proc_root(&[
+        (
+            "if_inet6",
+            "fe8000000000000020d530fffeac0034 03 40 20 80     eth0\n\
+             not an if_inet6 row\n",
+        ),
+        (
+            "route",
+            "Iface        Destination     Gateway Flags   RefCnt  Use     Metric  Mask            MTU     Window  IRTT\n\
+             eth0    00000000        0100A8C0        0003    0       0       600     00000000        0       0       0\n\
+             eth0    badrow\n",
+        ),
+    ]);
+    let observation = observe(&mut provider);
+    let if_inet6_note = observation
+        .notes
+        .iter()
+        .find(|n| n.contains("/proc/net/if_inet6") && n.contains("could not be parsed"))
+        .expect("if_inet6 partial parse visible");
+    assert!(if_inet6_note.contains("line 2"), "{if_inet6_note}");
+    let route_note = observation
+        .notes
+        .iter()
+        .find(|n| n.contains("/proc/net/route") && n.contains("could not be parsed"))
+        .expect("route partial parse visible");
+    assert!(route_note.contains("line 3"), "{route_note}");
+    use araiguma_core::provider::SectionResult;
+    assert!(
+        matches!(observation.addresses_v6, SectionResult::Observed(ref items) if items.len() == 1)
+    );
+    assert!(
+        matches!(observation.routes_v4, SectionResult::Observed(ref items) if items.len() == 1)
+    );
+}
+
+#[test]
+fn entirely_malformed_file_is_observed_empty_with_the_reason() {
+    // Every row rejected: the section is still Observed (the file was
+    // readable), zero items, and the note makes the emptiness honest —
+    // distinct from an empty file, which produces no note at all.
+    let mut provider = temp_proc_root(&[("ipv6_route", "nope\nalso nope\n")]);
+    let observation = observe(&mut provider);
+    use araiguma_core::provider::SectionResult;
+    assert!(
+        matches!(observation.routes_v6, SectionResult::Observed(ref items) if items.is_empty()),
+        "readable file with only invalid rows is observed-empty, not failed"
+    );
+    assert!(observation
+        .notes
+        .iter()
+        .any(|n| n.contains("/proc/net/ipv6_route") && n.contains("2 of its data rows")));
+}
+
+#[test]
+fn non_contiguous_netmask_rows_are_rejected_with_the_reason_not_normalized() {
+    // WO-03-F / AUD-08: the mask FF00FF00 (255.0.255.0) is not a prefix
+    // encoding. The row must be rejected with a diagnostic naming the
+    // mask — never silently converted into /8, which would claim a
+    // different valid network.
+    let mut provider = temp_proc_root(&[(
+        "route",
+        "Iface        Destination     Gateway Flags   RefCnt  Use     Metric  Mask            MTU     Window  IRTT\n\
+         eth0    0000A8C0        00000000        0001    0       0       0       00FF00FF        0       0       0\n\
+         eth0    0000A8C0        00000000        0001    0       0       0       00FFFFFF        0       0       0\n",
+    )]);
+    let observation = observe(&mut provider);
+    use araiguma_core::provider::SectionResult;
+    let SectionResult::Observed(routes) = observation.routes_v4 else {
+        panic!("observed");
+    };
+    assert_eq!(routes.len(), 1, "only the contiguous /24 row translates");
+    assert_eq!(routes[0].destination.unwrap().prefix_len, 24);
+    let note = observation
+        .notes
+        .iter()
+        .find(|n| n.contains("non-contiguous netmask"))
+        .expect("the rejected mask is visible");
+    assert!(note.contains("255.0.255.0"), "{note}");
+    assert!(note.contains("line 2"), "{note}");
+}
+
+#[test]
+fn unreadable_files_fail_the_section_with_the_error() {
+    // A missing file fails the section (existing behavior, pinned here as
+    // the AUD-07 contrast: missing != empty != partially parsed).
+    let mut provider = temp_proc_root(&[]);
+    let observation = observe(&mut provider);
+    use araiguma_core::provider::SectionResult;
+    assert!(matches!(observation.routes_v6, SectionResult::Failed(_)));
+
+    // A path that exists but cannot be read as a file (a directory where
+    // the file is expected) also fails with the error preserved.
+    let root =
+        std::env::temp_dir().join(format!("araiguma-sysfs-aud07-dir-{}", std::process::id()));
+    let net = root.join("net");
+    std::fs::create_dir_all(net.join("ipv6_route")).expect("dir in place of the file");
+    let mut provider = araiguma_sysfs::SysFsProvider::with_roots("/nonexistent-sys", &root);
+    let observation = observe(&mut provider);
+    assert!(
+        matches!(observation.routes_v6, SectionResult::Failed(ref e) if e.contains("cannot read"))
+    );
+}

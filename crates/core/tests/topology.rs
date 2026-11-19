@@ -921,3 +921,53 @@ fn multipath_hops_count_as_routes_using_their_interfaces() {
     assert_eq!(wlp3s0.detail.routes_using, 1);
     assert_eq!(wlp3s0.detail.default_routes, 1);
 }
+
+#[test]
+fn unattributed_observations_never_fabricate_a_provider() {
+    // WO-03-F / AUD-06: `primary_source()` used to fall back to Netlink
+    // when the source list was empty — inventing provenance that was never
+    // observed. The document boundary now REJECTS observations without
+    // sources (see the CLI tests); this test pins the projection's defense
+    // in depth: a kernel statement that somehow arrives without
+    // attribution is shown as an explicitly unattributed relationship,
+    // never dressed up as a named provider's observation.
+    let mut snapshot = fixture("empty");
+    let mut a = interface_fixture(6, "veth0", "other");
+    a.kind = InterfaceKind::Veth;
+    a.peer_ifindex = Some(7);
+    a.sources = vec![];
+    let mut b = interface_fixture(7, "veth1", "other");
+    b.kind = InterfaceKind::Veth;
+    b.peer_ifindex = Some(6);
+    b.sources = vec![];
+    let mut port = interface_fixture(8, "eth1", "ethernet");
+    port.master_ifindex = Some(9);
+    port.sources = vec![];
+    let mut bridge = interface_fixture(9, "br0", "other");
+    bridge.kind = InterfaceKind::Bridge;
+    snapshot.interfaces = vec![a, b, port, bridge];
+
+    let doc = build_topology(&snapshot);
+    for edge in &doc.edges {
+        match edge.edge_kind {
+            EdgeKind::VethPeer | EdgeKind::BridgeMember => match &edge.evidence {
+                Evidence::Observed { .. } => panic!(
+                    "an unattributed statement must not claim a provider: {:?}",
+                    edge
+                ),
+                Evidence::Inferred { reason } => assert!(
+                    reason.contains("without provider attribution"),
+                    "the reason states the missing attribution: {reason}"
+                ),
+            },
+            _ => {}
+        }
+    }
+    // The relationships themselves still exist (the kernel statements are
+    // real); only the attribution is honest.
+    assert!(doc.edges.iter().any(|e| e.edge_kind == EdgeKind::VethPeer));
+    assert!(doc
+        .edges
+        .iter()
+        .any(|e| e.edge_kind == EdgeKind::BridgeMember));
+}

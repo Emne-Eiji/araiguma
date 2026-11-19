@@ -117,7 +117,17 @@ function asSource(value: unknown, path: string): ObservationSource {
 }
 
 function asSources(value: unknown, path: string): ObservationSource[] {
-  return asArray(value, path).map((item, i) => asSource(item, `${path}[${i}]`));
+  const sources = asArray(value, path).map((item, i) => asSource(item, `${path}[${i}]`));
+  // Provenance contract (WO-03-F / AUD-06, parity with the Rust
+  // projector): an observation with NO source is invalid — nothing
+  // actually supplied it, and no attribution may be invented for it.
+  if (sources.length === 0) {
+    fail(
+      path,
+      'must name at least one provider — an observation without provenance is not a valid observation',
+    );
+  }
+  return sources;
 }
 
 // A route protocol/scope/type: a known name, or { other: <raw value> }

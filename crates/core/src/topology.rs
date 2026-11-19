@@ -247,9 +247,10 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
                     },
                     to: NodeId::Interface { ifindex: master },
                     edge_kind,
-                    evidence: Evidence::Observed {
-                        source: primary_source(&iface.sources),
-                    },
+                    evidence: observed_evidence(
+                        &iface.sources,
+                        "the kernel master statement (IFLA_MASTER) reached the projection without provider attribution",
+                    ),
                     detail: Some(format!(
                         "interface is a port of its master (IFLA_MASTER); {flavor}"
                     )),
@@ -337,9 +338,10 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
                                     },
                                     to: NodeId::Interface { ifindex: peer },
                                     edge_kind: EdgeKind::VethPeer,
-                                    evidence: Evidence::Observed {
-                                        source: primary_source(&iface.sources),
-                                    },
+                                    evidence: observed_evidence(
+                                        &iface.sources,
+                                        "the kernel veth peer statement reached the projection without provider attribution",
+                                    ),
                                     detail: Some(
                                         "veth peer (mutual kernel-named ifindexes, same namespace)"
                                             .to_string(),
@@ -427,9 +429,10 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
                     },
                     to: NodeId::Interface { ifindex: parent },
                     edge_kind: EdgeKind::LinkParent,
-                    evidence: Evidence::Observed {
-                        source: primary_source(&iface.sources),
-                    },
+                    evidence: observed_evidence(
+                        &iface.sources,
+                        "the kernel parent-link statement (IFLA_LINK) reached the projection without provider attribution",
+                    ),
                     detail: Some(flavor.to_string()),
                 });
             } else {
@@ -514,16 +517,18 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
             .collect::<Vec<_>>()
             .join(", ");
         ensure_gateway_node(&mut nodes, gateway);
+        let contributing_sources: Vec<ObservationSource> = routes
+            .iter()
+            .filter_map(|(route, _)| route.sources.first().copied())
+            .collect();
         edges.push(TopologyEdge {
             from: NodeId::Interface { ifindex: oif },
             to: NodeId::Gateway { address: gateway },
             edge_kind: EdgeKind::GatewayRoute,
-            evidence: Evidence::Observed {
-                source: routes
-                    .first()
-                    .and_then(|(route, _)| route.sources.first().copied())
-                    .unwrap_or(ObservationSource::Netlink),
-            },
+            evidence: observed_evidence(
+                &contributing_sources,
+                "the routing-table statements naming this gateway reached the projection without provider attribution",
+            ),
             detail: Some(format!(
                 "{} via this gateway (main table 254)",
                 plural_routes(routes.len(), &destinations)
@@ -782,11 +787,27 @@ fn annotate_interface(nodes: &mut [TopologyNode], ifindex: u32, note: String) {
     }
 }
 
-fn primary_source(sources: &[ObservationSource]) -> ObservationSource {
-    sources
-        .first()
-        .copied()
-        .unwrap_or(ObservationSource::Netlink)
+/// The primary provider of an observation, when one is attributed.
+/// An EMPTY source list yields `None` — never a fabricated provider
+/// (WO-03-F / AUD-06: `primary_source()` used to fall back to Netlink,
+/// inventing provenance that was never observed).
+fn primary_source(sources: &[ObservationSource]) -> Option<ObservationSource> {
+    sources.first().copied()
+}
+
+/// Evidence for a kernel-stated relationship. With attributed provenance
+/// this is a plain observation; without any attribution (the document
+/// boundary rejects such observations, so this is defense in depth) the
+/// relationship is still shown — but explicitly marked as carrying no
+/// provider attribution, never dressed up as a named provider's
+/// observation.
+fn observed_evidence(sources: &[ObservationSource], unattributed: &str) -> Evidence {
+    match primary_source(sources) {
+        Some(source) => Evidence::Observed { source },
+        None => Evidence::Inferred {
+            reason: unattributed.to_string(),
+        },
+    }
 }
 
 /// Interfaces with an address whose prefix contains `address`.
