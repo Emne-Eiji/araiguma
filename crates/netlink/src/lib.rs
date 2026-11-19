@@ -27,9 +27,12 @@ pub use monitor::{Monitor, Signal};
 /// The rtnetlink discovery provider.
 ///
 /// A netlink connection is created lazily and reused across observations.
-/// If a request fails (for example after the socket died), the connection
-/// is dropped and recreated on the next observation, so a single broken
-/// socket degrades one run instead of poisoning the provider forever.
+/// Connection lifecycle (WO-03-F / AUD-14): EVERY dump failure — link,
+/// address, or route — resets the cached connection the same way, so a
+/// broken socket degrades exactly one observation run instead of poisoning
+/// the provider forever; the next observation re-establishes a fresh
+/// connection. There is no retry loop: one attempt per section per run,
+/// failures surface as `Failed` sections with the error preserved.
 #[derive(Debug, Default)]
 pub struct NetlinkProvider {
     handle: Option<Handle>,
@@ -38,6 +41,16 @@ pub struct NetlinkProvider {
 impl NetlinkProvider {
     pub fn new() -> Self {
         Self { handle: None }
+    }
+
+    /// Test seam (WO-03-F / AUD-14): a provider wired to an injected
+    /// connection handle, so dump-failure recovery is testable against a
+    /// real-but-broken socket without depending on kernel failure modes.
+    #[doc(hidden)]
+    pub fn with_handle(handle: Handle) -> Self {
+        Self {
+            handle: Some(handle),
+        }
     }
 
     async fn handle(&mut self) -> Result<Handle, String> {
@@ -52,6 +65,12 @@ impl NetlinkProvider {
             }
             Err(error) => Err(format!("netlink socket: {error}")),
         }
+    }
+
+    /// Drop the cached connection (called on ANY dump failure; see the
+    /// type documentation — the next observation reconnects).
+    fn reset_connection(&mut self) {
+        self.handle = None;
     }
 }
 
@@ -69,26 +88,35 @@ fn failed_observation(error: &str) -> ProviderObservation {
     }
 }
 
-async fn dump_routes(handle: &Handle, family: AddressFamily) -> SectionResult<Route> {
+/// One route-family dump. Errors are returned to the caller, which
+/// applies the uniform connection-reset policy (see [`NetlinkProvider`]).
+async fn dump_routes(
+    handle: &Handle,
+    family: AddressFamily,
+) -> Result<Vec<netlink_packet_route::route::RouteMessage>, rtnetlink::Error> {
     let message = match family {
         AddressFamily::Ipv4 => RouteMessageBuilder::<Ipv4Addr>::new().build(),
         AddressFamily::Ipv6 => RouteMessageBuilder::<Ipv6Addr>::new().build(),
     };
-    match handle
+    handle
         .route()
         .get(message)
         .execute()
         .try_collect::<Vec<_>>()
         .await
-    {
-        Ok(messages) => SectionResult::Observed(
-            messages
-                .iter()
-                .filter_map(translate::translate_route)
-                .collect(),
-        ),
-        Err(error) => SectionResult::Failed(format!("route dump: {error}")),
+}
+
+/// Translate route messages, counting untranslatable ones (§5.2).
+fn translate_routes(messages: &[netlink_packet_route::route::RouteMessage]) -> (Vec<Route>, usize) {
+    let mut items = Vec::with_capacity(messages.len());
+    let mut dropped = 0usize;
+    for message in messages {
+        match translate::translate_route(message) {
+            Some(route) => items.push(route),
+            None => dropped += 1,
+        }
     }
+    (items, dropped)
 }
 
 #[async_trait::async_trait]
@@ -107,19 +135,36 @@ impl DiscoveryProvider for NetlinkProvider {
             Err(error) => return failed_observation(&error),
         };
 
+        let mut notes: Vec<String> = Vec::new();
+
+        // Link dump. Any failure resets the connection (AUD-14) — the
+        // next observation builds a fresh one.
         let interfaces = match handle.link().get().execute().try_collect::<Vec<_>>().await {
-            Ok(messages) => SectionResult::Observed(
-                messages
-                    .iter()
-                    .filter_map(translate::translate_link)
-                    .collect(),
-            ),
+            Ok(messages) => {
+                let mut items = Vec::with_capacity(messages.len());
+                let mut dropped = 0usize;
+                for message in &messages {
+                    match translate::translate_link(message) {
+                        Some(interface) => items.push(interface),
+                        None => dropped += 1,
+                    }
+                }
+                if dropped > 0 {
+                    notes.push(format!(
+                        "{dropped} link message(s) from the dump could not be translated into the model \
+                         (e.g. missing name or ifindex); they are not represented — the rest of the \
+                         dump stands"
+                    ));
+                }
+                SectionResult::Observed(items)
+            }
             Err(error) => {
-                self.handle = None;
+                self.reset_connection();
                 SectionResult::Failed(format!("link dump: {error}"))
             }
         };
 
+        // Address dump (v4 and v6 share one request; the split is by family).
         let (addresses_v4, addresses_v6) = match handle
             .address()
             .get()
@@ -130,18 +175,27 @@ impl DiscoveryProvider for NetlinkProvider {
             Ok(messages) => {
                 let mut v4: Vec<Address> = Vec::new();
                 let mut v6: Vec<Address> = Vec::new();
+                let mut dropped = 0usize;
                 for message in &messages {
-                    if let Some(address) = translate::translate_address(message) {
-                        match address.family {
+                    match translate::translate_address(message) {
+                        Some(address) => match address.family {
                             AddressFamily::Ipv4 => v4.push(address),
                             AddressFamily::Ipv6 => v6.push(address),
-                        }
+                        },
+                        None => dropped += 1,
                     }
+                }
+                if dropped > 0 {
+                    notes.push(format!(
+                        "{dropped} address message(s) from the dump could not be translated into the model \
+                         (e.g. no address attribute or unknown family); they are not represented — the \
+                         rest of the dump stands"
+                    ));
                 }
                 (SectionResult::Observed(v4), SectionResult::Observed(v6))
             }
             Err(error) => {
-                self.handle = None;
+                self.reset_connection();
                 (
                     SectionResult::Failed(format!("address dump: {error}")),
                     SectionResult::Failed(format!("address dump: {error}")),
@@ -149,8 +203,42 @@ impl DiscoveryProvider for NetlinkProvider {
             }
         };
 
-        let routes_v4 = dump_routes(&handle, AddressFamily::Ipv4).await;
-        let routes_v6 = dump_routes(&handle, AddressFamily::Ipv6).await;
+        // Route dumps — the SAME recovery policy as link and address dumps
+        // (AUD-14: previously only link/address failures reset the
+        // connection; a route-dump failure left the broken connection
+        // cached for the next run).
+        let routes_v4 = match dump_routes(&handle, AddressFamily::Ipv4).await {
+            Ok(messages) => {
+                let (items, dropped) = translate_routes(&messages);
+                if dropped > 0 {
+                    notes.push(format!(
+                        "{dropped} IPv4 route message(s) from the dump could not be translated into \
+                         the model; they are not represented — the rest of the dump stands"
+                    ));
+                }
+                SectionResult::Observed(items)
+            }
+            Err(error) => {
+                self.reset_connection();
+                SectionResult::Failed(format!("route dump: {error}"))
+            }
+        };
+        let routes_v6 = match dump_routes(&handle, AddressFamily::Ipv6).await {
+            Ok(messages) => {
+                let (items, dropped) = translate_routes(&messages);
+                if dropped > 0 {
+                    notes.push(format!(
+                        "{dropped} IPv6 route message(s) from the dump could not be translated into \
+                         the model; they are not represented — the rest of the dump stands"
+                    ));
+                }
+                SectionResult::Observed(items)
+            }
+            Err(error) => {
+                self.reset_connection();
+                SectionResult::Failed(format!("route dump: {error}"))
+            }
+        };
 
         ProviderObservation {
             provider: ProviderId::Netlink,
@@ -162,7 +250,7 @@ impl DiscoveryProvider for NetlinkProvider {
             routes_v6,
             // Netlink is the authoritative source; no fidelity caveats.
             fidelity_limited: false,
-            notes: Vec::new(),
+            notes,
         }
     }
 }

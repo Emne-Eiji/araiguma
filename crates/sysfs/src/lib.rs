@@ -179,6 +179,8 @@ impl SysFsProvider {
                 // Gateway None here means the kernel reported no gateway
                 // (on-link) — an observed absence.
                 gateway: entry.gateway.map(IpAddr::V4),
+                // procfs exposes no RTA_VIA encoding.
+                via: None,
                 output_interface: name_to_ifindex.get(&entry.iface).copied(),
                 output_interface_name: Some(entry.iface),
                 protocol: None,
@@ -229,6 +231,8 @@ impl SysFsProvider {
                 // Gateway None here means the kernel reported no gateway
                 // (on-link) — an observed absence, same as the v4 file.
                 gateway: entry.gateway.map(IpAddr::V6),
+                // procfs exposes no RTA_VIA encoding.
+                via: None,
                 output_interface: name_to_ifindex.get(&entry.iface).copied(),
                 output_interface_name: Some(entry.iface),
                 protocol: None,

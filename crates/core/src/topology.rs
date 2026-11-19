@@ -472,7 +472,11 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
                 &mut inferred_candidates,
                 route,
                 route.output_interface,
-                route.gateway,
+                // An RTA_VIA next hop (AUD-13) is a gateway too — with its
+                // own family — and is never an on-link absence.
+                route
+                    .gateway
+                    .or_else(|| route.via.as_ref().and_then(|via| via.as_ip())),
                 None,
             ),
             NextHops::Multi(hops) => {
@@ -484,7 +488,8 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
                         &mut inferred_candidates,
                         route,
                         hop.output_interface,
-                        hop.gateway,
+                        hop.gateway
+                            .or_else(|| hop.via.as_ref().and_then(|via| via.as_ip())),
                         hop.weight,
                     );
                 }

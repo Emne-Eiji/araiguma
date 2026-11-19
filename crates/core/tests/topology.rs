@@ -564,6 +564,7 @@ fn route_fixture(oif: Option<u32>, dest: &str, prefix: u8, gateway: Option<&str>
         family: AddressFamily::Ipv4,
         destination: Some(IpNet::new(IpAddr::V4(dest.parse().unwrap()), prefix)),
         gateway: gateway.map(|g| IpAddr::V4(g.parse().unwrap())),
+        via: None,
         output_interface: oif,
         output_interface_name: None,
         protocol: Some(RouteProtocol::Static),
@@ -880,6 +881,7 @@ fn multipath_hops_count_as_routes_using_their_interfaces() {
         family: AddressFamily::Ipv4,
         destination: Some(IpNet::new(IpAddr::V4("0.0.0.0".parse().unwrap()), 0)),
         gateway: None,
+        via: None,
         output_interface: None,
         output_interface_name: None,
         protocol: Some(RouteProtocol::Static),
@@ -892,6 +894,7 @@ fn multipath_hops_count_as_routes_using_their_interfaces() {
         next_hops: NextHops::Multi(vec![
             NextHop {
                 gateway: Some(IpAddr::V4("192.168.1.1".parse().unwrap())),
+                via: None,
                 output_interface: Some(2),
                 output_interface_name: Some("eth0".into()),
                 weight: Some(1),
@@ -899,6 +902,7 @@ fn multipath_hops_count_as_routes_using_their_interfaces() {
             },
             NextHop {
                 gateway: Some(IpAddr::V4("192.168.5.1".parse().unwrap())),
+                via: None,
                 output_interface: Some(3),
                 output_interface_name: Some("wlp3s0".into()),
                 weight: Some(2),

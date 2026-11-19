@@ -551,14 +551,67 @@ pub struct Address {
     pub sources: Vec<ObservationSource>,
 }
 
+/// A next-hop address encoded by the kernel's `RTA_VIA` — a gateway with
+/// its OWN address family, which may differ from the route's family
+/// (WO-03-F / AUD-13). Distinct from `RTA_GATEWAY`: MPLS routes and some
+/// encapsulations encode their next hop this way, including non-IP
+/// (`AF_PACKET`) forms. The family is preserved verbatim; nothing is
+/// silently reinterpreted as a same-family gateway, and a route carrying
+/// a via is NEVER presented as on-link.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RouteViaAddr {
+    /// `RTA_VIA` with an IPv4 address (route family may still be IPv6).
+    Inet(Ipv4Addr),
+    /// `RTA_VIA` with an IPv6 address (route family may still be IPv4).
+    Inet6(Ipv6Addr),
+    /// `RTA_VIA` with `AF_PACKET` bytes (e.g. MPLS MAC next hops).
+    Packet(Vec<u8>),
+    /// `RTA_VIA` with any other address family; the raw family number and
+    /// bytes are preserved verbatim, never guessed.
+    Other { family: u16, bytes: Vec<u8> },
+}
+
+impl RouteViaAddr {
+    /// The via as a plain IP address when it is one (for gateway-style
+    /// presentation); `None` for non-IP encodings — those stay what they
+    /// are and are never forced into an IP shape.
+    pub fn as_ip(&self) -> Option<IpAddr> {
+        match self {
+            RouteViaAddr::Inet(addr) => Some(IpAddr::V4(*addr)),
+            RouteViaAddr::Inet6(addr) => Some(IpAddr::V6(*addr)),
+            RouteViaAddr::Packet(_) | RouteViaAddr::Other { .. } => None,
+        }
+    }
+}
+
+impl fmt::Display for RouteViaAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RouteViaAddr::Inet(addr) => write!(f, "{addr} (rt-via, ipv4)"),
+            RouteViaAddr::Inet6(addr) => write!(f, "{addr} (rt-via, ipv6)"),
+            RouteViaAddr::Packet(bytes) => write!(f, "{bytes:02x?} (rt-via, af-packet)"),
+            RouteViaAddr::Other { family, bytes } => {
+                write!(f, "{bytes:02x?} (rt-via, af-{family})")
+            }
+        }
+    }
+}
+
 /// One observed next hop of a multipath route (`RTA_MULTIPATH` entry).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NextHop {
     /// Next-hop gateway. `None` = the kernel reported no gateway for this
     /// hop (on-link) — the same observed-absence semantics as
-    /// [`Route::gateway`].
+    /// [`Route::gateway`]. A hop may instead carry its next hop as
+    /// [`RouteViaAddr`] (`RTA_VIA` inside the hop); a via-carrying hop is
+    /// never on-link.
     pub gateway: Option<IpAddr>,
+    /// `RTA_VIA` next-hop encoding of this hop, when the kernel used it
+    /// (WO-03-F / AUD-13); preserved with its own address family.
+    #[serde(default)]
+    pub via: Option<RouteViaAddr>,
     /// Output interface index; `None` = not observed.
     pub output_interface: Option<u32>,
     /// Output interface name, resolved during the merge; `None` = not
@@ -614,8 +667,16 @@ pub struct Route {
     /// Next-hop gateway. For a route that was successfully observed,
     /// `None` means the kernel reported **no gateway** (an on-link route) —
     /// an observed absence, not missing data. A route that no provider
-    /// observed at all simply does not appear in the snapshot.
+    /// observed at all simply does not appear in the snapshot. A route
+    /// may instead encode its next hop as `RTA_VIA` ([`Self::via`], with
+    /// its own address family); a via-carrying route is never on-link.
     pub gateway: Option<IpAddr>,
+    /// `RTA_VIA` next-hop encoding, when the kernel used it (WO-03-F /
+    /// AUD-13): a gateway with its own address family, which may differ
+    /// from the route's family (MPLS and encapsulation setups). Preserved
+    /// verbatim; never reinterpreted as an on-link absence.
+    #[serde(default)]
+    pub via: Option<RouteViaAddr>,
     /// Output interface index; `None` = not observed.
     pub output_interface: Option<u32>,
     /// Output interface name; `None` = not observed.

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { NetworkSnapshot, Route } from '../types';
-  import { formatGateway, formatIpNet, formatProtocol } from '../lib/format';
+  import { formatGateway, formatIpNet, formatProtocol, formatRouteVia } from '../lib/format';
   import {
     hopCount,
     isMultipath,
@@ -179,8 +179,17 @@
                     title="the kernel sent RTA_MULTIPATH but it could not be decoded; the reason is in the details"
                   >{hopGatewayLabel(route)}</span>
                 {:else}
-                  <span title={route.gateway === null ? 'the kernel reported no gateway for this route (on-link)' : undefined}>
-                    {formatGateway(route.gateway)}
+                  <span title={route.gateway === null && route.via === null
+                    ? 'the kernel reported no gateway for this route (on-link)'
+                    : route.gateway === null
+                      ? 'the kernel encodes this next hop as RTA_VIA (own address family) — not on-link'
+                      : undefined}
+                  >
+                    {route.gateway !== null
+                      ? formatGateway(route.gateway)
+                      : route.via !== null
+                        ? formatRouteVia(route.via)
+                        : formatGateway(null)}
                   </span>
                 {/if}
               </td>

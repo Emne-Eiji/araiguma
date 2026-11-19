@@ -494,3 +494,75 @@ describe('route TOS validation (WO-03-F / AUD-02)', () => {
     );
   });
 });
+
+describe('route via (RTA_VIA) validation and display (WO-03-F / AUD-13)', () => {
+  it('accepts cross-family via encodings and rejects malformed ones', () => {
+    // An IPv4 route whose next hop is an IPv6 address via RTA_VIA: the
+    // family deliberately does NOT need to match the route's family.
+    const crossFamily = snapshotWith((d) => {
+      (d.routes as Array<Record<string, unknown>>)[0].via = { inet6: '2001:db8::9' };
+    });
+    expect(() => parseSnapshot(crossFamily)).not.toThrow();
+
+    const packet = snapshotWith((d) => {
+      (d.routes as Array<Record<string, unknown>>)[0].via = { packet: [0xaa, 0xbb] };
+    });
+    expect(() => parseSnapshot(packet)).not.toThrow();
+
+    const other = snapshotWith((d) => {
+      (d.routes as Array<Record<string, unknown>>)[0].via = {
+        other: { family: 247, bytes: [0, 1, 2] },
+      };
+    });
+    expect(() => parseSnapshot(other)).not.toThrow();
+
+    const badFamily = snapshotWith((d) => {
+      (d.routes as Array<Record<string, unknown>>)[0].via = { inet: 'not-an-ip' };
+    });
+    expect(() => parseSnapshot(badFamily)).toThrow(/routes\[0\]\.via\.inet/);
+
+    const unknownShape = snapshotWith((d) => {
+      (d.routes as Array<Record<string, unknown>>)[0].via = { mpls: 100 };
+    });
+    expect(() => parseSnapshot(unknownShape)).toThrow(
+      /routes\[0\]\.via: expected \{inet\}, \{inet6\}, \{packet\}, or \{other\}/,
+    );
+
+    const byteOutOfRange = snapshotWith((d) => {
+      (d.routes as Array<Record<string, unknown>>)[0].via = { packet: [256] };
+    });
+    expect(() => parseSnapshot(byteOutOfRange)).toThrow(
+      /routes\[0\]\.via\.packet\[0\]: expected an integer <= 255/,
+    );
+  });
+
+  it('a via-carrying route is never labeled on-link', async () => {
+    const { nextHopLabel } = await import('../src/lib/routes');
+    const viaRoute = { ...baseRouteFixture(), gateway: null, via: { inet6: '2001:db8::9' } };
+    expect(nextHopLabel(viaRoute)).toContain('2001:db8::9');
+    expect(nextHopLabel(viaRoute)).not.toContain('on-link');
+    const onLinkRoute = { ...baseRouteFixture(), gateway: null, via: null };
+    expect(nextHopLabel(onLinkRoute)).toBe('on-link');
+  });
+});
+
+function baseRouteFixture() {
+  return {
+    family: 'ipv4' as const,
+    destination: { address: '10.5.0.0', prefixLen: 24 },
+    gateway: null,
+    via: null,
+    outputInterface: 2,
+    outputInterfaceName: 'eth0',
+    protocol: 'static' as const,
+    scope: 'universe' as const,
+    routeType: 'unicast' as const,
+    metric: 0,
+    table: 254,
+    tos: null,
+    flags: [],
+    nextHops: 'single' as const,
+    sources: ['netlink' as const],
+    notes: [],
+  };
+}

@@ -8,6 +8,18 @@
 // and the fixtures in the same commit.
 
 export type AddressFamily = 'ipv4' | 'ipv6';
+
+/**
+ * A next-hop address encoded by the kernel's RTA_VIA — a gateway with its
+ * OWN address family, which may differ from the route's family (MPLS and
+ * encapsulation routes; WO-03-F / AUD-13). A route carrying a via is
+ * never on-link.
+ */
+export type RouteViaAddr =
+  | { inet: string }
+  | { inet6: string }
+  | { packet: number[] }
+  | { other: { family: number; bytes: number[] } };
 export type ObservationSource = 'netlink' | 'sysfs' | 'procfs';
 
 export type InterfaceKind =
@@ -90,6 +102,9 @@ export interface IpNet {
 // weight null = not observed (kernel rtnh_hops absent).
 export interface NextHop {
   gateway: string | null;
+  /** RTA_VIA next-hop encoding of this hop, when the kernel used it
+   * (own family, may cross the route's family; WO-03-F / AUD-13). */
+  via: RouteViaAddr | null;
   outputInterface: number | null;
   outputInterfaceName: string | null;
   weight: number | null;
@@ -146,6 +161,10 @@ export interface Route {
   family: AddressFamily;
   destination: IpNet | null;
   gateway: string | null;
+  /** RTA_VIA next-hop encoding, when the kernel used it (WO-03-F /
+   * AUD-13): a gateway with its own address family. A route carrying a
+   * via is never on-link. */
+  via: RouteViaAddr | null;
   outputInterface: number | null;
   outputInterfaceName: string | null;
   protocol: RouteProtocol | null;

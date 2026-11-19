@@ -273,27 +273,32 @@ fn both_agree<T: PartialEq>(a: &Option<T>, b: &Option<T>) -> bool {
 type ReducedHop = (Option<IpAddr>, Option<u32>);
 
 /// The COMPLETE next-hop identity two netlink observations of the same
-/// route must share: gateway, output interface, kernel weight, and hop
-/// flags, in kernel order.
+/// route must share: gateway, via (`RTA_VIA`, AUD-13), output interface,
+/// kernel weight, and hop flags, in kernel order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FullHop {
     gateway: Option<IpAddr>,
+    via: Option<crate::model::RouteViaAddr>,
     oif_index: Option<u32>,
     weight: Option<u16>,
     flags: Option<Vec<String>>,
 }
 
 fn full_hops(route: &Route, name_to_ifindex: &dyn Fn(&str) -> Option<u32>) -> Vec<FullHop> {
-    let resolve =
-        |gateway: Option<IpAddr>, oif_index: Option<u32>, oif_name: Option<&str>| FullHop {
-            gateway,
-            oif_index: oif_index.or_else(|| oif_name.and_then(name_to_ifindex)),
-            weight: None,
-            flags: None,
-        };
+    let resolve = |gateway: Option<IpAddr>,
+                   via: Option<crate::model::RouteViaAddr>,
+                   oif_index: Option<u32>,
+                   oif_name: Option<&str>| FullHop {
+        gateway,
+        via,
+        oif_index: oif_index.or_else(|| oif_name.and_then(name_to_ifindex)),
+        weight: None,
+        flags: None,
+    };
     match &route.next_hops {
         NextHops::Single => vec![resolve(
             route.gateway,
+            route.via.clone(),
             route.output_interface,
             route.output_interface_name.as_deref(),
         )],
@@ -302,6 +307,7 @@ fn full_hops(route: &Route, name_to_ifindex: &dyn Fn(&str) -> Option<u32>) -> Ve
             .map(|hop| {
                 let mut full = resolve(
                     hop.gateway,
+                    hop.via.clone(),
                     hop.output_interface,
                     hop.output_interface_name.as_deref(),
                 );
@@ -331,6 +337,7 @@ fn same_netlink_route(a: &Route, b: &Route, name_to_ifindex: &dyn Fn(&str) -> Op
         && both_agree(&a.scope, &b.scope)
         && both_agree(&a.route_type, &b.route_type)
         && both_agree(&a.tos, &b.tos)
+        && both_agree(&a.via, &b.via)
         && both_agree(&a.flags, &b.flags)
         && match (&a.next_hops, &b.next_hops) {
             (NextHops::Undecoded(reason_a), NextHops::Undecoded(reason_b)) => reason_a == reason_b,

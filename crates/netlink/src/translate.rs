@@ -11,7 +11,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use araiguma_core::model::{
     Address, AddressFamily, AddressScope, AdminState, Interface, InterfaceKind, IpNet,
     MacObservation, NextHop, NextHops, ObservationSource, OperState, Route, RouteProtocol,
-    RouteScope, RouteType, RT_TABLE_MAIN,
+    RouteScope, RouteType, RouteViaAddr, RT_TABLE_MAIN,
 };
 use netlink_packet_route::address::{
     AddressAttribute, AddressFlags, AddressMessage, AddressScope as NlAddressScope,
@@ -20,7 +20,9 @@ use netlink_packet_route::link::{
     InfoKind, LinkAttribute, LinkFlags, LinkMessage, State as NlOperState,
 };
 use netlink_packet_route::route::RouteNextHop;
-use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteFlags, RouteMessage};
+use netlink_packet_route::route::{
+    RouteAddress, RouteAttribute, RouteFlags, RouteMessage, RouteVia,
+};
 use netlink_packet_route::{AddressFamily as NlAddressFamily, RouteNetlinkMessage};
 
 /// Classify a multicast notification into a short change kind, or `None`
@@ -415,19 +417,49 @@ fn next_hop_flags(flags: &netlink_packet_route::route::RouteNextHopFlags) -> Vec
     names
 }
 
+/// Map the crate's `RTA_VIA` representation to the model's — the
+/// address family is preserved verbatim (WO-03-F / AUD-13): a cross-
+/// family via (e.g. an IPv6 next hop on an IPv4 route) stays what it is,
+/// and non-IP encodings (AF_PACKET, other families) keep their raw bytes.
+fn map_route_via(via: &RouteVia) -> RouteViaAddr {
+    match via {
+        RouteVia::Inet(addr) => RouteViaAddr::Inet(*addr),
+        RouteVia::Inet6(addr) => RouteViaAddr::Inet6(*addr),
+        RouteVia::Packet(bytes) => RouteViaAddr::Packet(bytes.clone()),
+        RouteVia::Other((family, bytes)) => RouteViaAddr::Other {
+            family: u16::from(u8::from(*family)),
+            bytes: bytes.clone(),
+        },
+        // `RouteVia` is #[non_exhaustive]: a variant added by a future
+        // crate release (the dependency is pinned, so this arm is
+        // unreachable today) is preserved as an explicitly UNKNOWN
+        // encoding — never dropped, never misread as on-link.
+        _ => RouteViaAddr::Other {
+            family: u16::MAX,
+            bytes: Vec::new(),
+        },
+    }
+}
+
 /// Translate one `RTA_MULTIPATH` next-hop entry. Per-hop weight: the
 /// kernel stores `rtnh_hops` (weight − 1); the model carries the
-/// effective weight as iproute2 displays it.
+/// effective weight as iproute2 displays it. A hop may carry its next
+/// hop as `RTA_VIA` (with its own family) instead of `RTA_GATEWAY` —
+/// both are preserved, and a via-carrying hop is never on-link.
 fn translate_next_hop(hop: &RouteNextHop, family: AddressFamily) -> NextHop {
     let mut gateway: Option<IpAddr> = None;
+    let mut via: Option<RouteViaAddr> = None;
     for attribute in &hop.attributes {
-        if let RouteAttribute::Gateway(value) = attribute {
-            gateway = route_address_ip(value);
+        match attribute {
+            RouteAttribute::Gateway(value) => gateway = route_address_ip(value),
+            RouteAttribute::Via(value) => via = Some(map_route_via(value)),
+            _ => {}
         }
     }
     let _ = family; // hop gateways are validated by the kernel to match the route family
     NextHop {
         gateway,
+        via,
         output_interface: Some(hop.interface_index),
         output_interface_name: None,
         weight: Some(u16::from(hop.hops) + 1),
@@ -458,6 +490,7 @@ pub fn translate_route(message: &RouteMessage) -> Option<Route> {
 
     let mut destination_ip: Option<IpAddr> = None;
     let mut gateway: Option<IpAddr> = None;
+    let mut via: Option<RouteViaAddr> = None;
     let mut output_interface: Option<u32> = None;
     let mut priority: Option<u32> = None;
     let mut table: Option<u32> = None;
@@ -467,6 +500,11 @@ pub fn translate_route(message: &RouteMessage) -> Option<Route> {
         match attribute {
             RouteAttribute::Destination(value) => destination_ip = route_address_ip(value),
             RouteAttribute::Gateway(value) => gateway = route_address_ip(value),
+            // RTA_VIA (WO-03-F / AUD-13): a next-hop encoding with its own
+            // address family, used by MPLS and encapsulation routes. It is
+            // NOT a gateway attribute — conflating them would lose the
+            // family — and its presence means the route is NOT on-link.
+            RouteAttribute::Via(value) => via = Some(map_route_via(value)),
             RouteAttribute::Oif(value) => output_interface = Some(*value),
             RouteAttribute::Priority(value) => priority = Some(*value),
             RouteAttribute::Table(value) => table = Some(*value),
@@ -527,7 +565,10 @@ pub fn translate_route(message: &RouteMessage) -> Option<Route> {
         destination,
         // `None` here is the kernel's own "no gateway" (on-link) encoding —
         // except for multipath routes, where the hops carry the gateways.
+        // An `RTA_VIA` next hop lives in `via` with its own family and
+        // never collapses into either of these fields.
         gateway,
+        via,
         output_interface,
         output_interface_name: None,
         protocol: Some(map_route_protocol(message.header.protocol)),
@@ -938,6 +979,110 @@ mod tests {
             )),
             None,
             "irrelevant messages are not classified"
+        );
+    }
+
+    #[test]
+    fn rta_via_is_preserved_with_its_family_and_never_becomes_onlink() {
+        // WO-03-F / AUD-13: an IPv4 route whose next hop is encoded as
+        // RTA_VIA with an IPv6 address (MPLS/encapsulation shape). The via
+        // is preserved with its own family; the gateway stays what the
+        // kernel said (none); nothing is reinterpreted or dropped.
+        let mut message = route_message(NlAddressFamily::Inet);
+        message.header.destination_prefix_length = 24;
+        message.attributes = vec![
+            RouteAttribute::Destination(RouteAddress::Inet("10.5.0.0".parse().unwrap())),
+            RouteAttribute::Via(RouteVia::Inet6("2001:db8::9".parse().unwrap())),
+            RouteAttribute::Oif(2),
+        ];
+        let route = translate_route(&message).expect("valid route");
+        assert_eq!(route.gateway, None, "RTA_VIA is not RTA_GATEWAY");
+        assert_eq!(
+            route.via,
+            Some(RouteViaAddr::Inet6("2001:db8::9".parse().unwrap())),
+            "the via keeps its own address family"
+        );
+        // Serialization round-trip preserves it.
+        let json = serde_json::to_string(&route).unwrap();
+        assert!(
+            json.contains("\"via\":{\"inet6\":\"2001:db8::9\"}"),
+            "{json}"
+        );
+
+        // Same-family via (MPLS via an IPv4 address) — still a via.
+        let mut same_family = route_message(NlAddressFamily::Inet);
+        same_family.header.destination_prefix_length = 24;
+        same_family.attributes = vec![
+            RouteAttribute::Destination(RouteAddress::Inet("10.5.1.0".parse().unwrap())),
+            RouteAttribute::Via(RouteVia::Inet("192.0.2.9".parse().unwrap())),
+            RouteAttribute::Oif(2),
+        ];
+        let route = translate_route(&same_family).expect("valid route");
+        assert_eq!(
+            route.via,
+            Some(RouteViaAddr::Inet("192.0.2.9".parse().unwrap()))
+        );
+        assert_eq!(route.gateway, None);
+
+        // Non-IP encodings keep their raw bytes and family verbatim.
+        let mut packet_via = route_message(NlAddressFamily::Inet);
+        packet_via.header.destination_prefix_length = 24;
+        packet_via.attributes = vec![
+            RouteAttribute::Destination(RouteAddress::Inet("10.5.2.0".parse().unwrap())),
+            RouteAttribute::Via(RouteVia::Packet(vec![0xaa, 0xbb, 0xcc])),
+            RouteAttribute::Oif(2),
+        ];
+        let route = translate_route(&packet_via).expect("valid route");
+        assert_eq!(
+            route.via,
+            Some(RouteViaAddr::Packet(vec![0xaa, 0xbb, 0xcc]))
+        );
+        let mut other_via = route_message(NlAddressFamily::Inet);
+        other_via.header.destination_prefix_length = 24;
+        other_via.attributes = vec![
+            RouteAttribute::Destination(RouteAddress::Inet("10.5.3.0".parse().unwrap())),
+            RouteAttribute::Via(RouteVia::Other((
+                NlAddressFamily::Mpls,
+                vec![0x00, 0x01, 0x02],
+            ))),
+            RouteAttribute::Oif(2),
+        ];
+        let route = translate_route(&other_via).expect("valid route");
+        assert_eq!(
+            route.via,
+            Some(RouteViaAddr::Other {
+                family: u16::from(u8::from(NlAddressFamily::Mpls)),
+                bytes: vec![0x00, 0x01, 0x02],
+            })
+        );
+    }
+
+    #[test]
+    fn multipath_hop_rta_via_is_preserved_per_hop() {
+        // RTA_VIA can also ride inside an RTA_MULTIPATH hop; each hop's
+        // via is preserved with its family and never flattens into a
+        // route-level gateway.
+        let mut message = route_message(NlAddressFamily::Inet);
+        message.header.destination_prefix_length = 24;
+        let mut hop = RouteNextHop::default();
+        hop.interface_index = 2;
+        hop.hops = 1;
+        hop.attributes = vec![RouteAttribute::Via(RouteVia::Inet6(
+            "2001:db8::1".parse().unwrap(),
+        ))];
+        message.attributes = vec![
+            RouteAttribute::Destination(RouteAddress::Inet("10.7.0.0".parse().unwrap())),
+            RouteAttribute::MultiPath(vec![hop]),
+        ];
+        let route = translate_route(&message).expect("valid route");
+        let NextHops::Multi(hops) = &route.next_hops else {
+            panic!("multipath decoded: {:?}", route.next_hops);
+        };
+        assert_eq!(hops.len(), 1);
+        assert_eq!(hops[0].gateway, None);
+        assert_eq!(
+            hops[0].via,
+            Some(RouteViaAddr::Inet6("2001:db8::1".parse().unwrap()))
         );
     }
 }

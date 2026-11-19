@@ -6,8 +6,8 @@
   // provenance are fully visible (WO-02 correction §4) — the table stays
   // scannable.
 
-  import type { NextHop, Route } from '../types';
-  import { formatGateway, formatIpNet, formatProtocol } from '../lib/format';
+  import type { NextHop, Route, RouteViaAddr } from '../types';
+  import { formatGateway, formatIpNet, formatProtocol, formatRouteVia } from '../lib/format';
   import { isMultipath, routeHasLimitationNotes, undecodedHopsReason } from '../lib/routes';
 
   let {
@@ -35,6 +35,14 @@
       hop.outputInterfaceName
       ?? (hop.outputInterface !== null ? `ifindex ${hop.outputInterface}` : '—')
     );
+  }
+
+  // WO-03-F / AUD-13: a hop's next-hop label — gateway, or its RTA_VIA
+  // encoding (own family); a via-carrying hop is never on-link.
+  function hopGatewayLabel(hop: NextHop): string {
+    if (hop.gateway !== null) return formatGateway(hop.gateway);
+    if (hop.via !== null) return formatRouteVia(hop.via);
+    return formatGateway(null);
   }
 
   function hopFlags(hop: NextHop): string {
@@ -79,12 +87,23 @@
         </dd>
       {:else}
         <dt>Gateway</dt>
-        <dd class="mono" title={route.gateway === null
-          ? 'the kernel reported no gateway for this route (on-link) — an observed absence'
-          : undefined}
-        >
-          {formatGateway(route.gateway)}
-        </dd>
+        {#if route.gateway !== null}
+          <dd class="mono" title={undefined}>{formatGateway(route.gateway)}</dd>
+        {:else if route.via !== null}
+          <dd
+            class="mono"
+            title="the kernel encodes this next hop as RTA_VIA, with its own address family — this route is NOT on-link"
+          >
+            {formatRouteVia(route.via)}
+          </dd>
+        {:else}
+          <dd
+            class="mono"
+            title="the kernel reported no gateway for this route (on-link) — an observed absence"
+          >
+            on-link
+          </dd>
+        {/if}
         <dt>Output interface</dt>
         <dd class="mono">
           {route.outputInterfaceName
@@ -130,7 +149,7 @@
           <li data-testid="route-next-hop">
             <div class="hop-line">
               <span class="hop-index mono">{index + 1}</span>
-              <span class="mono">via {formatGateway(hop.gateway)}</span>
+              <span class="mono">via {hopGatewayLabel(hop)}</span>
               <span class="mono dim">on {hopInterface(hop)}</span>
               {#if hop.weight !== null}
                 <span class="hop-weight mono" title="kernel weight (rtnh_hops + 1), as iproute2 displays it">weight {hop.weight}</span>

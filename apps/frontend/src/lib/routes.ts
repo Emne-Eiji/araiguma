@@ -2,6 +2,7 @@
 // visible filter for other tables. Pure and unit-tested.
 
 import type { NetworkSnapshot, Route } from '../types';
+import { formatRouteVia } from './format';
 
 export const MAIN_TABLE = 254;
 
@@ -98,6 +99,15 @@ export function routeKey(route: Route, index: number): string {
 // plus a hint that observation notes exist when they do. Multipath rows
 // name the hop count (WO-03 M3) — the gateways live in the hop list, and
 // "on-link" would be wrong for them.
+// WO-03-F / AUD-13: the effective next-hop label of a route. A route
+// carrying an RTA_VIA encoding is NEVER "on-link" — the via (with its
+// own address family) is the next hop.
+export function nextHopLabel(route: Route): string {
+  if (route.gateway !== null) return `via ${route.gateway}`;
+  if (route.via !== null) return `via ${formatRouteVia(route.via)}`;
+  return 'on-link';
+}
+
 export function routeAriaLabel(route: Route): string {
   const destination =
     route.destination === null
@@ -109,9 +119,7 @@ export function routeAriaLabel(route: Route): string {
     ? 'next hops not decodable'
     : isMultipath(route)
       ? `multipath with ${hopCount(route)} next hops`
-      : route.gateway === null
-        ? 'on-link'
-        : `via ${route.gateway}`;
+      : nextHopLabel(route);
   const output =
     route.outputInterfaceName !== null
       ? `on ${route.outputInterfaceName}`

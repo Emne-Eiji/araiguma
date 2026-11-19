@@ -9,7 +9,7 @@
 // v1 documents are accepted only where unambiguous (every macAddress a
 // non-null string); v1 null macAddress is rejected with the reason.
 
-import type { NetworkSnapshot, ObservationSource } from '../types';
+import type { NetworkSnapshot, ObservationSource, RouteViaAddr } from '../types';
 import { isMacObservation } from './format';
 import {
   asArray,
@@ -22,6 +22,8 @@ import {
   asString,
   asStringArray,
   fail,
+  isIpv4Address,
+  isIpv6Address,
   optional,
 } from './validate';
 
@@ -144,11 +146,47 @@ function asTaggedOrOther(
 // 'single' and the loader normalizes to match). Explicit null is INVALID —
 // same discipline as macAddress: the Rust model never writes null here,
 // and a null must not silently become 'single' (parity with serde, whose
-// default applies only to an absent field). An EMPTY multi array is
-// rejected: the writer never produces one (an undecodable RTA_MULTIPATH is
-// recorded as { undecoded } instead), so an empty list can only be a
-// hand-written or corrupted document claiming a multipath observation that
-// carries no hops.
+// default applies only to an absent field).
+
+// An RTA_VIA next-hop encoding (WO-03-F / AUD-13): a gateway with its own
+// address family — which may DIFFER from the route's family, so no
+// family check applies — or a non-IP encoding preserved as raw bytes.
+// (An EMPTY multi array is rejected inside validateNextHops: the writer
+// never produces one.)
+function asRouteVia(value: unknown, path: string): RouteViaAddr {
+  const record = asRecord(value, path);
+  if (record.inet !== undefined) {
+    const raw = asString(record.inet, `${path}.inet`);
+    if (!isIpv4Address(raw)) {
+      fail(`${path}.inet`, `expected an IPv4 address, got ${JSON.stringify(raw)}`);
+    }
+    return { inet: raw };
+  }
+  if (record.inet6 !== undefined) {
+    const raw = asString(record.inet6, `${path}.inet6`);
+    if (!isIpv6Address(raw)) {
+      fail(`${path}.inet6`, `expected an IPv6 address, got ${JSON.stringify(raw)}`);
+    }
+    return { inet6: raw };
+  }
+  if (record.packet !== undefined) {
+    const bytes = asArray(record.packet, `${path}.packet`);
+    bytes.forEach((byte, i) => asInt(byte, `${path}.packet[${i}]`, { min: 0, max: 255 }));
+    return { packet: bytes as number[] };
+  }
+  if (record.other !== undefined) {
+    const other = asRecord(record.other, `${path}.other`);
+    const family = asInt(other.family, `${path}.other.family`, {
+      min: 0,
+      max: 65535,
+    });
+    const bytes = asArray(other.bytes, `${path}.other.bytes`);
+    bytes.forEach((byte, i) => asInt(byte, `${path}.other.bytes[${i}]`, { min: 0, max: 255 }));
+    return { other: { family, bytes: bytes as number[] } };
+  }
+  fail(path, 'expected {inet}, {inet6}, {packet}, or {other}');
+}
+
 function validateNextHops(value: unknown, family: 'ipv4' | 'ipv6', path: string): void {
   if (value === undefined) return;
   if (value === null) {
@@ -164,6 +202,10 @@ function validateNextHops(value: unknown, family: 'ipv4' | 'ipv6', path: string)
   const record = asRecord(value, path);
   if (record.multi !== undefined) {
     const hops = asArray(record.multi, `${path}.multi`);
+    // An EMPTY multi array is rejected: the writer never produces one (an
+    // undecodable RTA_MULTIPATH is recorded as { undecoded } instead), so
+    // an empty list can only be a hand-written or corrupted document
+    // claiming a multipath observation that carries no hops.
     if (hops.length === 0) {
       fail(
         `${path}.multi`,
@@ -174,6 +216,7 @@ function validateNextHops(value: unknown, family: 'ipv4' | 'ipv6', path: string)
       const hopPath = `${path}.multi[${i}]`;
       const hopRecord = asRecord(hop, hopPath);
       optional((v, p) => asIpAddress(v, p, family), hopRecord.gateway, `${hopPath}.gateway`);
+      optional(asRouteVia, hopRecord.via, `${hopPath}.via`);
       optional((v, p) => asInt(v, p, { min: 1 }), hopRecord.outputInterface, `${hopPath}.outputInterface`);
       optional(asString, hopRecord.outputInterfaceName, `${hopPath}.outputInterfaceName`);
       // The kernel stores rtnh_hops (weight − 1) in a u8, so the effective
@@ -237,6 +280,10 @@ function validateRoute(raw: unknown, path: string): void {
     asPrefixLen(destination.prefixLen, family, `${path}.destination.prefixLen`);
   }
   optional((v, p) => asIpAddress(v, p, family), route.gateway, `${path}.gateway`);
+  // An RTA_VIA next hop may carry an address family DIFFERENT from the
+  // route's family (that is the point of the encoding), so the via
+  // validator deliberately does not check against `family`.
+  optional(asRouteVia, route.via, `${path}.via`);
   optional((v, p) => asInt(v, p, { min: 1 }), route.outputInterface, `${path}.outputInterface`);
   optional(asString, route.outputInterfaceName, `${path}.outputInterfaceName`);
   optional((v, p) => asTaggedOrOther(v, ROUTE_PROTOCOLS, p), route.protocol, `${path}.protocol`);

@@ -1272,3 +1272,62 @@ async fn netns_appended_same_key_ecmp_routes_all_survive_the_merge() {
         );
     }
 }
+
+#[tokio::test]
+async fn netns_dump_failures_reset_the_connection_uniformly_and_recover() {
+    // WO-03-F / AUD-14: link, address, AND route dump failures all reset
+    // the cached connection, and the next observation recovers on a fresh
+    // one. Before the fix only link/address failures reset; a route-dump
+    // failure left the broken connection cached. A dropped (never spawned)
+    // connection provides a real-but-broken socket: requests fail without
+    // any kernel interaction. One attempt per section per run — no retry
+    // loop, no fabricated observations.
+    if !ensure_netns("netns_dump_failures_reset_the_connection_uniformly_and_recover") {
+        return; // parent: the child already ran and was asserted
+    }
+
+    use rtnetlink::new_connection;
+
+    fn broken_handle() -> rtnetlink::Handle {
+        let (connection, handle, _) = new_connection().expect("create connection");
+        // The connection future is dropped without spawning: its channel
+        // dies, so every request through the handle fails.
+        drop(connection);
+        handle
+    }
+
+    // A provider wired to a broken connection: the FIRST dump (links)
+    // fails and the connection is reset; every section of this run
+    // reports the failure honestly.
+    let mut provider = NetlinkProvider::with_handle(broken_handle());
+    let observation = provider.observe().await;
+    assert!(matches!(
+        observation.interfaces,
+        SectionResult::Failed(ref error) if error.contains("link dump")
+    ));
+    assert!(matches!(
+        observation.routes_v4,
+        SectionResult::Failed(ref error) if error.contains("route dump")
+    ));
+
+    // Recovery: the failed run reset the connection, so the next
+    // observation builds a fresh one and succeeds end to end.
+    let observation = provider.observe().await;
+    assert_eq!(
+        observation.state(),
+        ProviderState::Available,
+        "a fresh connection recovers the provider: {:?}",
+        observation.sections()
+    );
+
+    // Repeated failures stay safe: another broken connection fails ONE
+    // run (no retry storm), resets again, and recovers again.
+    provider = NetlinkProvider::with_handle(broken_handle());
+    let observation = provider.observe().await;
+    assert!(matches!(
+        observation.interfaces,
+        SectionResult::Failed(ref error) if error.contains("link dump")
+    ));
+    let observation = provider.observe().await;
+    assert_eq!(observation.state(), ProviderState::Available);
+}

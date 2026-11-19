@@ -87,6 +87,7 @@ describe('route missing-field semantics', () => {
 describe('route accessibility and limitation markers (WO-02 correction §4/§9.4)', () => {
   const base: Route = {
     family: 'ipv4',
+    via: null,
     destination: { address: '0.0.0.0', prefixLen: 0 },
     gateway: '192.168.1.1',
     outputInterface: 2,
@@ -149,6 +150,7 @@ describe('route accessibility and limitation markers (WO-02 correction §4/§9.4
 describe('multipath representation (WO-03 M3)', () => {
   const single: Route = {
     family: 'ipv4',
+    via: null,
     destination: { address: '10.0.0.0', prefixLen: 24 },
     gateway: '10.0.0.1',
     outputInterface: 2,
@@ -172,8 +174,8 @@ describe('multipath representation (WO-03 M3)', () => {
     outputInterfaceName: null,
     nextHops: {
       multi: [
-        { gateway: '10.0.0.1', outputInterface: 2, outputInterfaceName: 'eth0', weight: 2, flags: ['onlink'] },
-        { gateway: '10.0.1.1', outputInterface: 3, outputInterfaceName: 'wlp3s0', weight: 1, flags: [] },
+        { gateway: '10.0.0.1', via: null, outputInterface: 2, outputInterfaceName: 'eth0', weight: 2, flags: ['onlink'] },
+        { gateway: '10.0.1.1', via: null, outputInterface: 3, outputInterfaceName: 'wlp3s0', weight: 1, flags: [] },
       ],
     },
   };

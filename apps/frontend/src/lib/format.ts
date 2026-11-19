@@ -11,6 +11,7 @@ import type {
   MacObservationKind,
   ProviderState,
   RouteProtocol,
+  RouteViaAddr,
 } from '../types';
 
 export type StateTone = 'up' | 'down' | 'unknown' | 'unavailable';
@@ -124,6 +125,15 @@ export function formatGateway(gateway: string | null): string {
   // The kernel reports "no gateway" for on-link routes; that is an
   // observation, not a gap.
   return gateway ?? 'on-link';
+}
+
+// An RTA_VIA next-hop encoding (WO-03-F / AUD-13), shown with its own
+// address family. A route or hop carrying a via is NEVER on-link.
+export function formatRouteVia(via: RouteViaAddr): string {
+  if ('inet' in via) return `${via.inet} (rt-via, ipv4)`;
+  if ('inet6' in via) return `${via.inet6} (rt-via, ipv6)`;
+  if ('packet' in via) return `${via.packet.map((b) => b.toString(16).padStart(2, '0')).join(':')} (rt-via, af-packet)`;
+  return `${via.other.bytes.map((b) => b.toString(16).padStart(2, '0')).join(':')} (rt-via, af-${via.other.family})`;
 }
 
 export function formatProtocol(protocol: RouteProtocol | null): string {
