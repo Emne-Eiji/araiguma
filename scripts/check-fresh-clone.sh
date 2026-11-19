@@ -1,68 +1,105 @@
 #!/usr/bin/env bash
-# Fresh-clone bootstrap check (WO-03-F / AUD-04).
+# Fresh-clone FULL VALIDATION (WO-03-F / AUD-04, closed by WO-03-FC).
 #
-# Reproduces a genuinely fresh checkout (git clone of the working
-# repository into /tmp — no untracked working-tree files, no locally
-# generated fixtures), runs the DOCUMENTED bootstrap path, and verifies
-# the Rust test suite passes without any manual fixture preparation.
+# Proves the property that matters: a genuinely fresh checkout of the
+# exact commit under validation can execute the COMPLETE applicable
+# documented test workflow — Rust fmt/clippy/workspace tests (including
+# the isolated-netns integration tests), svelte-check, Vitest, the
+# production frontend build, Playwright e2e, npm audit, the private
+# D-Bus harness probe, live observation with iproute2 cross-validation,
+# live CLI documents through the real frontend validators, the git
+# identity audit, shell syntax checks, fixture-regeneration stability,
+# and the durable-storage budget — with nothing but the documented
+# bootstrap as preparation.
 #
-# Everything regenerable stays outside the persistent tree: the clone's
-# BUILD OUTPUT lives under /tmp; the clone itself sits NEXT TO the main
-# repository (a few MB, removed at the end) so the bootstrap's budget
-# check measures the real persistent project area instead of all of /tmp.
+# The previous version (WO-03-F) ran only
+#   cargo test -p araiguma-sysfs -p araiguma-core -p araiguma-cli
+# inside the clone; the independent review correctly found that
+# insufficient. This version runs the clone's own scripts/test-all.sh.
+#
+# Structure (separation is deliberate):
+#   * scripts/fresh-clone-prepare.sh — PREPARATION: isolated clone from
+#     the exact commit, tracked-only verification, documented bootstrap,
+#     fixture generation + stability check. Reusable on its own.
+#   * this script — VALIDATION: runs the complete workflow inside the
+#     prepared clone, preserves the logs, cleans up.
+#
+# Never recursive: this script refuses to run when invoked from inside a
+# fresh-clone validation (ARIGUMA_FRESH_CLONE_VALIDATION=1), and the
+# fresh-clone step inside the clone's own test-all.sh skips itself with
+# an explicit recursion-guard message for the same reason.
+#
+# The primary checkout's validation does not depend on this step's
+# outcome for its EARLIER steps (this is the last step of test-all.sh);
+# a failure here fails the suite, as any other step failure would.
+#
+# Regenerable material lives outside the persistent tree:
+#   /tmp/araiguma-fresh-clone-area  — the fresh clone (removed at exit)
+#   /tmp/araiguma-fresh-target      — isolated cargo build output (wiped
+#                                     per run: the build is from scratch)
+#   /tmp/araiguma-fresh-work        — isolated frontend work copy
+#   /tmp/araiguma-fresh-test-logs   — the clone's own test logs (copied
+#                                     into the primary logs dir, then
+#                                     removed)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CLONE="$(cd .. && pwd)/araiguma-fresh-clone"
+if [ "${ARIGUMA_FRESH_CLONE_VALIDATION:-}" = "1" ]; then
+  echo "check-fresh-clone: refusing to run — already inside a fresh-clone validation (no recursion)" >&2
+  exit 1
+fi
+
+CLONE_AREA=/tmp/araiguma-fresh-clone-area
+CLONE="$CLONE_AREA/araiguma"
 TARGET=/tmp/araiguma-fresh-target
+WORK=/tmp/araiguma-fresh-work
+LOGS=/tmp/araiguma-fresh-test-logs
+KEEP_LOGS="${ARIGUMA_TEST_LOG_DIR:-/tmp/araiguma-test-logs}"
 
-echo "[fresh-clone] cloning the repository (working tree HEAD, no untracked files)"
-rm -rf "$CLONE" "$TARGET"
-git clone --quiet . "$CLONE"
+cleanup() {
+  local rc=$?
+  rm -rf "$CLONE_AREA" "$TARGET" "$WORK" "$LOGS"
+  exit "$rc"
+}
+trap cleanup EXIT INT TERM
 
-# The documented one-time setup from docs/development.md, with the
-# sandbox's shared toolchain location and an isolated build directory.
-echo "[fresh-clone] running the documented bootstrap"
+# A fresh clone reproduces COMMITTED content. Validating against a dirty
+# tree would claim results about content that is not in the commit.
+if [ -n "$(git status --porcelain)" ]; then
+  echo "check-fresh-clone: working tree is dirty — commit or stash first (a fresh clone can only validate committed content):" >&2
+  git status --short >&2
+  exit 1
+fi
+SOURCE_COMMIT="$(git rev-parse HEAD)"
+echo "[fresh-clone] validating commit $SOURCE_COMMIT"
+
+# --- preparation ------------------------------------------------------------
+rm -rf "$CLONE_AREA" "$TARGET" "$WORK" "$LOGS"
+mkdir -p "$CLONE_AREA" "$KEEP_LOGS"
+scripts/fresh-clone-prepare.sh "$CLONE" "$SOURCE_COMMIT"
+
+# --- validation: the complete workflow inside the clone ---------------------
+# Isolated build output, isolated frontend work copy, isolated logs; the
+# recursion marker makes the clone's own fresh-clone step skip itself
+# visibly. Shared BY DESIGN (documented in scripts/env.sh and
+# docs/development.md, never project files): the Rust toolchain, the
+# persistent crate-download cache behind the CARGO_HOME symlink, the npm
+# download cache, and the Playwright browsers.
+echo "[fresh-clone] running the complete test workflow inside the clone"
 (
   cd "$CLONE"
-  # Same toolchain area as the main workspace; isolated build output.
-  ARIGUMA_TOOLCHAINS="${ARIGUMA_TOOLCHAINS:-$(cd .. && pwd)/toolchains}" \
-  CARGO_TARGET_DIR="$TARGET" \
-  ./scripts/bootstrap.sh
+  export ARIGUMA_FRESH_CLONE_VALIDATION=1
+  export CARGO_TARGET_DIR="$TARGET"
+  export ARIGUMA_FRONTEND_WORK="$WORK"
+  export ARIGUMA_TEST_LOG_DIR="$LOGS"
+  export ARIGUMA_LIVE_DOCS_DIR=/tmp/araiguma-fresh-live-docs
+  ./scripts/test-all.sh
 )
 
-# The empty-directory fixtures must exist after bootstrap alone.
-echo "[fresh-clone] verifying fixture generation"
-for required_dir in \
-  fixtures/sysfs/basic-workstation/class/net/wlan0/wireless \
-  fixtures/sysfs/combined-laptop/class/net/wlan0/wireless \
-  fixtures/sysfs/virtual-interfaces/class/net/br0/bridge \
-  fixtures/sysfs/empty/class/net; do
-  if [ ! -d "$CLONE/$required_dir" ]; then
-    echo "[fresh-clone] FAIL: $required_dir missing after bootstrap" >&2
-    exit 1
-  fi
-done
+# --- preserve the clone's validation logs as evidence -----------------------
+if compgen -G "$LOGS/*" > /dev/null; then
+  cp -r "$LOGS" "$KEEP_LOGS/fresh-clone-$(date +%Y%m%dT%H%M%S)"
+  echo "[fresh-clone] inner logs preserved under $KEEP_LOGS/"
+fi
 
-echo "[fresh-clone] running the sysfs + core test suites without manual preparation"
-(
-  cd "$CLONE"
-  # shellcheck source=scripts/env.sh disable=SC1091
-  source scripts/env.sh
-  CARGO_TARGET_DIR="$TARGET" cargo test -p araiguma-sysfs -p araiguma-core -p araiguma-cli
-)
-
-echo "[fresh-clone] verifying regeneration is byte-stable"
-(
-  cd "$CLONE"
-  ./scripts/gen-sysfs-fixtures.sh
-  ./scripts/gen-topology-fixtures.sh > /dev/null
-  if [ -n "$(git status --porcelain -- fixtures/)" ]; then
-    echo "[fresh-clone] FAIL: regeneration produced drift" >&2
-    git diff --stat -- fixtures/ >&2
-    exit 1
-  fi
-)
-
-rm -rf "$CLONE" "$TARGET"
-echo "[fresh-clone] OK — a fresh clone bootstraps and passes tests with no manual steps"
+echo "[fresh-clone] OK — commit $SOURCE_COMMIT passes the complete documented workflow from a genuinely fresh checkout"

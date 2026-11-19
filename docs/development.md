@@ -15,9 +15,27 @@ EMPTY directories (`wlan0/wireless`, `br0/bridge`, the empty-observation
 `class/net`) that Git cannot track, so a fresh clone relies on the
 bootstrap to create them — generation is deterministic, idempotent, and
 verified after running. There is exactly ONE documented setup path; no
-manual fixture preparation is ever needed, and
-`scripts/check-fresh-clone.sh` (part of `test-all.sh`) proves it by
-cloning the committed state, bootstrapping, and running the test suites.
+manual fixture preparation is ever needed.
+
+Fresh-clone validation (WO-03-FC / AUD-04 closure) proves the full
+property: a genuinely fresh checkout of an exact commit passes the
+COMPLETE documented workflow, not just a subset of the tests.
+
+* `scripts/fresh-clone-prepare.sh <dest> [<commit>]` — the preparation
+  half: isolated clone from the exact commit (tracked content only,
+  empty-directory fixtures verified absent before bootstrap), documented
+  bootstrap, fixture generation and byte-stability check.
+* `scripts/check-fresh-clone.sh` — the validation half: prepares a fresh
+  clone under `/tmp/araiguma-fresh-clone-area` and runs the clone's own
+  `scripts/test-all.sh` inside it (fmt, clippy, complete workspace tests
+  including isolated-netns integration tests, svelte-check, Vitest,
+  production build, Playwright e2e, npm audit, D-Bus harness probe, live
+  observation with iproute2 cross-validation, live CLI documents through
+  the frontend validators, git identity audit, shell syntax, fixture
+  stability, storage budget) with fully isolated build/work/log
+  locations. It is the last step of `test-all.sh`; it never recurses
+  (the nested fresh-clone step skips itself with an explicit recursion
+  guard), and the primary checkout's earlier steps never depend on it.
 
 ## Everyday commands
 
@@ -34,11 +52,12 @@ cloning the committed state, bootstrapping, and running the test suites.
 | Everything | `scripts/test-all.sh` |
 | Storage report | `scripts/disk-usage.sh` / `scripts/check-durable-size.sh` |
 
-Frontend tooling runs in an ephemeral work copy (`/tmp/araiguma-work`) that
-mirrors the repository layout; `node_modules` never exists inside the
-repository. Edit sources in the repository — `frontend.sh` refreshes the
-copy on every invocation. The generated `package-lock.json` is copied back
-and must stay committed.
+Frontend tooling runs in an ephemeral work copy (`/tmp/araiguma-work` by
+default; `ARIGUMA_FRONTEND_WORK` moves it, as the fresh-clone validation
+does) that mirrors the repository layout; `node_modules` never exists
+inside the repository. Edit sources in the repository — `frontend.sh`
+refreshes the copy on every invocation. The generated
+`package-lock.json` is copied back and must stay committed.
 
 ## Changing the data model (type-sync contract)
 

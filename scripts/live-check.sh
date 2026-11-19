@@ -121,12 +121,15 @@ echo "live-check: PASS — watch emitted a snapshot event and $changed_lines cha
 # A real CLI-produced snapshot plus its projected topology document, left
 # for the gate's frontend step to parse with the actual frontend
 # validators (see tests/live-document.test.ts and scripts/test-all.sh).
-rm -rf /tmp/araiguma-live-docs
-mkdir -p /tmp/araiguma-live-docs
-"$BIN" snapshot > /tmp/araiguma-live-docs/live-snapshot.json \
+# The directory is overridable so the fresh-clone validation (WO-03-FC)
+# keeps its live documents isolated from the primary checkout's.
+LIVE_DOCS_DIR="${ARIGUMA_LIVE_DOCS_DIR:-/tmp/araiguma-live-docs}"
+rm -rf "$LIVE_DOCS_DIR"
+mkdir -p "$LIVE_DOCS_DIR"
+"$BIN" snapshot > "$LIVE_DOCS_DIR/live-snapshot.json" \
   || fail "snapshot export for the frontend failed"
-"$BIN" topology --input /tmp/araiguma-live-docs/live-snapshot.json \
-  > /tmp/araiguma-live-docs/live-topology.json \
+"$BIN" topology --input "$LIVE_DOCS_DIR/live-snapshot.json" \
+  > "$LIVE_DOCS_DIR/live-topology.json" \
   || fail "topology projection for the frontend failed"
 
 echo "live-check: PASS — CLI snapshot + topology documents exported for frontend validation"

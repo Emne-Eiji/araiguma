@@ -56,10 +56,27 @@ fixtures_stable()   {
   ./scripts/gen-topology-fixtures.sh >/dev/null
   git diff --exit-code -- fixtures/
 }
-# WO-03-F / AUD-04: a genuinely fresh clone of the COMMITTED state must
-# bootstrap and pass tests with no manual fixture preparation. Runs late
-# in the suite (it recompiles in an isolated target directory).
-fresh_clone()     { scripts/check-fresh-clone.sh; }
+# Shared locations that the fresh-clone validation (WO-03-FC / AUD-04)
+# overrides so a validated clone never touches the primary checkout's
+# ephemeral state. Defaults are the documented everyday locations.
+FRONTEND_WORK="${ARIGUMA_FRONTEND_WORK:-/tmp/araiguma-work}"
+LIVE_DOCS="${ARIGUMA_LIVE_DOCS_DIR:-/tmp/araiguma-live-docs}"
+
+# WO-03-F / AUD-04, closed by WO-03-FC: a genuinely fresh clone of the
+# COMMITTED state must pass the COMPLETE documented workflow — this suite —
+# with the documented bootstrap as its only preparation. Runs late in the
+# suite (it recompiles from scratch in an isolated target directory).
+# Recursion guard (WO-03-FC): when this suite itself runs INSIDE a
+# fresh-clone validation, the nested fresh-clone step would be recursive
+# and is skipped with an explicit, reported message — nothing else is
+# skipped.
+fresh_clone() {
+  if [ "${ARIGUMA_FRESH_CLONE_VALIDATION:-}" = "1" ]; then
+    echo "SKIP (recursion guard): this suite is already running inside the fresh-clone validation — the fresh-clone property is being proven by this very run"
+    return 0
+  fi
+  scripts/check-fresh-clone.sh
+}
 rust_fmt()          { cargo fmt --all -- --check; }
 rust_clippy()       {
   cargo clippy --workspace --all-targets -- -D warnings > "$LOG_DIR/clippy.log" 2>&1
@@ -97,9 +114,9 @@ frontend_audit()    {
   # unnoticed drift. (Runtime exposure is the two production deps:
   # svelte + cytoscape; everything else is build/test tooling.)
   scripts/frontend.sh prepare >/dev/null 2>&1
-  (cd /tmp/araiguma-work/apps/frontend && npm audit --omit=dev 2>&1 | tail -n 6)
+  (cd "$FRONTEND_WORK/apps/frontend" && npm audit --omit=dev 2>&1 | tail -n 6)
   local full
-  full="$(cd /tmp/araiguma-work/apps/frontend && npm audit 2>&1)"
+  full="$(cd "$FRONTEND_WORK/apps/frontend" && npm audit 2>&1)"
   if printf '%s' "$full" | grep -qE 'found [1-9][0-9]* vulnerabilities'; then
     echo "npm audit reports vulnerabilities — assess before proceeding:" >&2
     printf '%s\n' "$full" | tail -n 20 >&2
@@ -112,8 +129,8 @@ live_observation()  { scripts/live-check.sh 2>&1 | tail -n 20; }
 frontend_live_docs() {
   # WO-03 M1 integration: the real CLI documents exported by the live
   # step must import cleanly through the actual frontend validators.
-  [ -d /tmp/araiguma-live-docs ] || { echo "no live documents exported" >&2; return 1; }
-  ARAIGUMA_LIVE_DOCS=/tmp/araiguma-live-docs scripts/frontend.sh test 2>&1 | tail -n 6
+  [ -d "$LIVE_DOCS" ] || { echo "no live documents exported" >&2; return 1; }
+  ARAIGUMA_LIVE_DOCS="$LIVE_DOCS" scripts/frontend.sh test 2>&1 | tail -n 6
 }
 git_identity() {
   local problems=""

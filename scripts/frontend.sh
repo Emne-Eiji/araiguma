@@ -18,12 +18,16 @@
 #   test      vitest run
 #   build     production build
 #   e2e       production build + playwright tests
+#
+# The work-copy location defaults to /tmp/araiguma-work and can be moved
+# with ARIGUMA_FRONTEND_WORK (used by the fresh-clone validation, which
+# must not touch the primary checkout's work copy).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=scripts/env.sh disable=SC1091
 source scripts/env.sh
 
-WORK=/tmp/araiguma-work
+WORK="${ARIGUMA_FRONTEND_WORK:-/tmp/araiguma-work}"
 COMMAND="${1:-prepare}"
 
 prepare() {
