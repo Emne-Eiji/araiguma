@@ -144,6 +144,7 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
     let mut tx_queue_len: Option<u32> = None;
     let mut master_ifindex: Option<u32> = None;
     let mut parent_ifindex: Option<u32> = None;
+    let mut link_netnsid: Option<i32> = None;
     let mut peer_from_info_data: Option<u32> = None;
     let mut oper_state: Option<OperState> = None;
     let mut kind: Option<InterfaceKind> = None;
@@ -158,6 +159,13 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
             LinkAttribute::TxQueueLen(value) => tx_queue_len = Some(*value),
             LinkAttribute::Controller(value) => master_ifindex = Some(*value),
             LinkAttribute::Link(value) => parent_ifindex = Some(*value),
+            // IFLA_LINK_NETNSID: the network namespace containing the link
+            // target (the veth peer, or the vlan/tunnel parent). Live-verified
+            // on kernel 5.10: present (with an allocated id) exactly when the
+            // target lives in another namespace; absent for same-namespace
+            // targets. The raw signed value is preserved verbatim — including
+            // a hypothetically unassigned -1 — never clamped or guessed.
+            LinkAttribute::LinkNetNsId(value) => link_netnsid = Some(*value),
             LinkAttribute::OperState(state) => oper_state = Some(map_oper_state(*state)),
             LinkAttribute::LinkInfo(infos) => {
                 for info in infos {
@@ -194,7 +202,9 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
     // named a link — that link is the PEER, not a parent. The peer is
     // recorded (InfoData wins when both sources appear; they name the same
     // device), and the link value is removed from parent_ifindex so no
-    // parent/underlay relationship is fabricated for a veth.
+    // parent/underlay relationship is fabricated for a veth. IFLA_LINK_NETNSID
+    // qualifies the same link target: when present, the peer (or parent) is
+    // in another network namespace and its ifindex is namespace-scoped.
     let mut peer_ifindex = None;
     if kind == InterfaceKind::Veth {
         peer_ifindex = peer_from_info_data.or(parent_ifindex);
@@ -202,6 +212,9 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
             parent_ifindex = None;
         }
     }
+    // A netnsid without a link target is still recorded verbatim (the kernel
+    // can report the link-netns of devices whose IFLA_LINK is absent); it is
+    // never interpreted here.
     let admin_state = Some(if message.header.flags.contains(LinkFlags::Up) {
         AdminState::Up
     } else {
@@ -241,6 +254,7 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
         master_ifindex,
         parent_ifindex,
         peer_ifindex,
+        link_netnsid,
         sources: vec![ObservationSource::Netlink],
         notes,
     })
@@ -743,6 +757,61 @@ mod tests {
         assert_eq!(interface.kind, InterfaceKind::Vlan);
         assert_eq!(interface.parent_ifindex, Some(2));
         assert_eq!(interface.peer_ifindex, None);
+    }
+
+    #[test]
+    fn link_netnsid_is_preserved_verbatim_for_veth_and_parents() {
+        // WO-03-F / AUD-01: IFLA_LINK_NETNSID qualifies the link target —
+        // the veth peer, or the vlan/tunnel parent. The raw signed value is
+        // recorded verbatim (never clamped, never guessed): a veth whose
+        // peer lives in another namespace carries the allocated netnsid,
+        // and so does a cross-namespace vlan parent.
+        let mut veth = link_message();
+        veth.header.index = 6;
+        veth.attributes = vec![
+            LinkAttribute::IfName("veth0".into()),
+            LinkAttribute::Link(7),
+            LinkAttribute::LinkNetNsId(0),
+            LinkAttribute::LinkInfo(vec![LinkInfo::Kind(InfoKind::Veth)]),
+        ];
+        let interface = translate_link(&veth).expect("valid link");
+        assert_eq!(interface.kind, InterfaceKind::Veth);
+        assert_eq!(interface.peer_ifindex, Some(7));
+        assert_eq!(
+            interface.link_netnsid,
+            Some(0),
+            "the kernel's netnsid statement is preserved"
+        );
+        assert_eq!(interface.parent_ifindex, None);
+
+        // A cross-namespace vlan parent carries the netnsid instead; a
+        // hypothetically unassigned id (-1) is preserved verbatim rather
+        // than turned into "not observed".
+        let mut vlan = link_message();
+        vlan.header.index = 8;
+        vlan.attributes = vec![
+            LinkAttribute::IfName("eth0.100".into()),
+            LinkAttribute::Link(2),
+            LinkAttribute::LinkNetNsId(-1),
+            LinkAttribute::LinkInfo(vec![LinkInfo::Kind(InfoKind::Vlan)]),
+        ];
+        let interface = translate_link(&vlan).expect("valid link");
+        assert_eq!(interface.kind, InterfaceKind::Vlan);
+        assert_eq!(interface.parent_ifindex, Some(2));
+        assert_eq!(interface.link_netnsid, Some(-1));
+
+        // Without the attribute: not observed (same-namespace target on
+        // this kernel — verified live).
+        let mut plain = link_message();
+        plain.header.index = 9;
+        plain.attributes = vec![
+            LinkAttribute::IfName("veth1".into()),
+            LinkAttribute::Link(10),
+            LinkAttribute::LinkInfo(vec![LinkInfo::Kind(InfoKind::Veth)]),
+        ];
+        let interface = translate_link(&plain).expect("valid link");
+        assert_eq!(interface.peer_ifindex, Some(10));
+        assert_eq!(interface.link_netnsid, None);
     }
 
     #[test]

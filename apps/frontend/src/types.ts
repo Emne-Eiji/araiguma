@@ -120,6 +120,13 @@ export interface Interface {
   // interfaces the kernel itself classified as veth. The peer may live in
   // another network namespace.
   peerIfindex: number | null;
+  /**
+   * Netnsid of the namespace containing the link target (veth peer, or
+   * parent for other kinds) when the kernel reported IFLA_LINK_NETNSID;
+   * null = not reported. A peer/parent with a netnsid lives in ANOTHER
+   * network namespace — its ifindex never resolves locally (WO-03-F).
+   */
+  linkNetnsid: number | null;
   sources: ObservationSource[];
   notes: string[];
 }
@@ -229,6 +236,8 @@ export interface NodeDetail {
   masterIfindex: number | null;
   parentIfindex: number | null;
   peerIfindex: number | null;
+  /** Netnsid of the link target's namespace (IFLA_LINK_NETNSID), when reported. */
+  linkNetnsid: number | null;
   routesUsing: number;
   defaultRoutes: number;
   sources: ObservationSource[];

@@ -890,3 +890,206 @@ async fn netns_combined_observation_integrates_all_wo03_features() {
     let peers = show(&["-d", "link", "show", "ar-c-veth0"]);
     assert!(peers.contains("veth"), "{peers}");
 }
+
+/// Run `ip` (or another command) and panic with stderr on failure.
+fn run_ok(program: &str, args: &[&str]) {
+    let output = Command::new(program).args(args).output().expect(program);
+    assert!(
+        output.status.success(),
+        "{program} {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Spawn a child process in a NEW network namespace (owned by this user
+/// namespace, so we keep CAP_NET_ADMIN over it) and hold it open. Returns
+/// the child's pid; the child dies with the test process, so the namespace
+/// and everything in it are cleaned up with the transient test namespace.
+fn spawn_child_netns() -> std::process::Child {
+    let child = Command::new("unshare")
+        .arg("-n")
+        .arg("sleep")
+        .arg("300")
+        .spawn()
+        .expect("spawn child netns");
+    // Wait until the child's netns link exists (it appears at exec time).
+    let netns = format!("/proc/{}/ns/net", child.id());
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !std::path::Path::new(&netns).exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "child netns never appeared"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    child
+}
+
+#[tokio::test]
+async fn netns_cross_namespace_veth_peer_never_draws_a_local_edge() {
+    // WO-03-F / AUD-01 — the audit's exact adversarial scenario, live: a
+    // real veth peer lives in ANOTHER network namespace while an unrelated
+    // LOCAL interface carries the same ifindex. The kernel marks the
+    // cross-namespace peer with IFLA_LINK_NETNSID; the observation must
+    // keep the peer unresolved and NEVER connect the veth to the colliding
+    // local interface.
+    if !ensure_netns("netns_cross_namespace_veth_peer_never_draws_a_local_edge") {
+        return; // parent: the child already ran and was asserted
+    }
+
+    // Occupy local ifindexes 2 and 3 with dummies (lo is 1): `ar-coll`
+    // (ifindex 2) will collide with the moved peer's namespace-scoped
+    // ifindex below.
+    ip(&["link", "add", "ar-coll", "type", "dummy"]);
+    ip(&["link", "add", "ar-d2", "type", "dummy"]);
+
+    // A veth pair inside a child network namespace. On this kernel the
+    // pair lands on child ifindexes 2 and 3; `ar-y0` (child ifindex 3,
+    // whose peer `ar-y1` holds child ifindex 2) is then moved into THIS
+    // namespace, where ifindex 2 is taken by the unrelated dummy — the
+    // kernel re-allocates a fresh local ifindex and reports the peer's
+    // namespace-scoped ifindex (2) plus IFLA_LINK_NETNSID.
+    let mut child = spawn_child_netns();
+    let child_netns = format!("/proc/{}/ns/net", child.id());
+    run_ok(
+        "nsenter",
+        &[
+            &format!("--net={child_netns}"),
+            "ip",
+            "link",
+            "add",
+            "ar-y0",
+            "type",
+            "veth",
+            "peer",
+            "name",
+            "ar-y1",
+        ],
+    );
+    let our_pid = std::process::id().to_string();
+    run_ok(
+        "nsenter",
+        &[
+            &format!("--net={child_netns}"),
+            "ip",
+            "link",
+            "set",
+            "ar-y0",
+            "netns",
+            &our_pid,
+        ],
+    );
+
+    let mut netlink = NetlinkProvider::new();
+    let observation = netlink.observe().await;
+    let mut sysfs = araiguma_sysfs::SysFsProvider::new();
+    let snapshot = araiguma_core::merge::merge(vec![observation, sysfs.observe().await], 21);
+
+    let veth = snapshot
+        .interfaces
+        .iter()
+        .find(|i| i.name == "ar-y0")
+        .expect("the moved veth end is observed locally")
+        .clone();
+    let colliding = snapshot
+        .interfaces
+        .iter()
+        .find(|i| i.name == "ar-coll")
+        .expect("the colliding dummy is observed")
+        .clone();
+
+    assert_eq!(veth.kind, InterfaceKind::Veth);
+    assert!(
+        veth.link_netnsid.is_some(),
+        "the kernel reports the peer's namespace (IFLA_LINK_NETNSID): {:?}",
+        veth.link_netnsid
+    );
+    assert_eq!(
+        veth.peer_ifindex,
+        Some(colliding.ifindex),
+        "the adversarial setup: the cross-namespace peer's ifindex equals the LOCAL dummy's ifindex"
+    );
+
+    // The projection must not draw any vethPeer edge — the colliding dummy
+    // is not the peer — and the annotation states the namespace fact.
+    let doc = araiguma_core::build_topology(&snapshot);
+    assert!(
+        !doc.edges
+            .iter()
+            .any(|e| e.edge_kind == araiguma_core::topology::EdgeKind::VethPeer),
+        "no veth edge may exist: the only local ifindex match is the unrelated dummy"
+    );
+    let node = doc
+        .nodes
+        .iter()
+        .find(|n| n.label == "ar-y0")
+        .expect("the veth node exists");
+    assert!(node
+        .annotations
+        .iter()
+        .any(|a| a.contains("lives in another network namespace")));
+
+    // Cleanup: kill the child; its namespace (and ar-y1 inside it) dies
+    // with it. The transient test namespace disappears on process exit.
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[tokio::test]
+async fn netns_cross_namespace_peer_without_collision_stays_unresolved() {
+    // The non-adversarial cross-namespace case: the peer's ifindex matches
+    // no local interface at all. The peer observation (ifindex + netnsid)
+    // is preserved, and no edge is invented.
+    if !ensure_netns("netns_cross_namespace_peer_without_collision_stays_unresolved") {
+        return; // parent: the child already ran and was asserted
+    }
+
+    let mut child = spawn_child_netns();
+    ip(&[
+        "link", "add", "ar-x0", "type", "veth", "peer", "name", "ar-x1",
+    ]);
+    // Move one end into the child namespace (its ifindex there is
+    // namespace-scoped; the kernel reports IFLA_LINK_NETNSID on ar-x0).
+    let child_pid = child.id().to_string();
+    ip(&["link", "set", "ar-x1", "netns", &child_pid]);
+
+    let mut netlink = NetlinkProvider::new();
+    let observation = netlink.observe().await;
+    let mut sysfs = araiguma_sysfs::SysFsProvider::new();
+    let snapshot = araiguma_core::merge::merge(vec![observation, sysfs.observe().await], 22);
+
+    let veth = snapshot
+        .interfaces
+        .iter()
+        .find(|i| i.name == "ar-x0")
+        .expect("the local veth end is observed")
+        .clone();
+    assert_eq!(veth.kind, InterfaceKind::Veth);
+    assert!(veth.peer_ifindex.is_some(), "the peer ifindex is observed");
+    assert!(
+        veth.link_netnsid.is_some(),
+        "the peer's namespace is reported"
+    );
+    // The peer itself is NOT part of this observation.
+    assert!(snapshot.interfaces.iter().all(|i| i.name != "ar-x1"));
+
+    let doc = araiguma_core::build_topology(&snapshot);
+    assert!(
+        !doc.edges
+            .iter()
+            .any(|e| e.edge_kind == araiguma_core::topology::EdgeKind::VethPeer),
+        "a peer in another namespace never becomes a local edge"
+    );
+    let node = doc
+        .nodes
+        .iter()
+        .find(|n| n.label == "ar-x0")
+        .expect("the veth node exists");
+    assert!(node
+        .annotations
+        .iter()
+        .any(|a| a.contains("lives in another network namespace")));
+
+    let _ = child.kill();
+    let _ = child.wait();
+}

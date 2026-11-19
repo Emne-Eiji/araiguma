@@ -28,6 +28,9 @@
         nodeIdKey(edge.to) === nodeIdKey(node.id),
     ),
   );
+  // WO-03-F: legacy documents predate linkNetnsid; treat an absent field as
+  // not reported (never as "in another namespace").
+  const peerNetnsid = $derived(node.detail.linkNetnsid ?? null);
 </script>
 
 <aside class="panel" data-testid="topology-details" aria-label="Topology node details">
@@ -81,11 +84,21 @@
         <dt>MTU</dt>
         <dd class="mono">{node.detail.mtu ?? '—'}</dd>
         <dt>veth peer</dt>
-        <dd class="mono" title={node.detail.peerIfindex !== null
-          ? 'the kernel named this veth peer; see the veth peer relation below'
-          : undefined}
+        <dd
+          class="mono"
+          title={node.detail.peerIfindex !== null
+            ? peerNetnsid !== null
+              ? 'the kernel named this veth peer AND its network namespace (IFLA_LINK_NETNSID): the peer lives in another namespace and is not part of this observation — no relationship is drawn'
+              : 'the kernel named this veth peer; see the veth peer relation below'
+            : undefined}
         >
-          {node.detail.peerIfindex ?? '—'}
+          {#if node.detail.peerIfindex === null}
+            —
+          {:else if peerNetnsid !== null}
+            #{node.detail.peerIfindex} in another netns (netnsid {peerNetnsid})
+          {:else}
+            #{node.detail.peerIfindex}
+          {/if}
         </dd>
         <dt>Routes via</dt>
         <dd class="mono">{node.detail.routesUsing} ({node.detail.defaultRoutes} default)</dd>

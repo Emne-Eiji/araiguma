@@ -54,6 +54,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 3,
         "defaultRoutes": 0,
         "sources": [
@@ -115,6 +116,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 5,
         "defaultRoutes": 1,
         "sources": [
@@ -176,6 +178,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 4,
         "defaultRoutes": 2,
         "sources": [
@@ -207,6 +210,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [
@@ -253,6 +257,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 1,
         "defaultRoutes": 0,
         "sources": [
@@ -297,6 +302,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [
@@ -331,6 +337,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [],
@@ -362,6 +369,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [],
@@ -393,6 +401,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [],

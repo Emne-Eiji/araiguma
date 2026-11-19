@@ -204,6 +204,14 @@ function validateInterface(raw: unknown, path: string): void {
   optional((v, p) => asInt(v, p, { min: 1 }), iface.masterIfindex, `${path}.masterIfindex`);
   optional((v, p) => asInt(v, p, { min: 1 }), iface.parentIfindex, `${path}.parentIfindex`);
   optional((v, p) => asInt(v, p, { min: 1 }), iface.peerIfindex, `${path}.peerIfindex`);
+  // IFLA_LINK_NETNSID: a signed 32-bit netnsid (the kernel can report an
+  // unassigned -1); null/absent = not reported. A netnsid means the link
+  // target (veth peer / parent) lives in another network namespace.
+  optional(
+    (v, p) => asInt(v, p, { min: -2147483648, max: 2147483647 }),
+    iface.linkNetnsid,
+    `${path}.linkNetnsid`,
+  );
   asSources(iface.sources, `${path}.sources`);
   asStringArray(iface.notes, `${path}.notes`);
 }

@@ -504,8 +504,29 @@ pub struct Interface {
     /// veth peer ifindex (WO-03 M2). `None` = not observed. Only set for
     /// interfaces the kernel itself classified as veth; see
     /// [`crate::topology::EdgeKind::VethPeer`] for the evidence-based
-    /// semantics. The peer may live in another network namespace.
+    /// semantics. The peer may live in another network namespace —
+    /// ifindex is namespace-scoped, so this value alone never identifies
+    /// an interface of this observation; see [`Self::link_netnsid`].
     pub peer_ifindex: Option<u32>,
+    /// Netnsid of the network namespace containing this interface's link
+    /// target — the kernel's `IFLA_LINK_NETNSID` (WO-03-F / AUD-01).
+    ///
+    /// Semantics (live-verified on kernel 5.10): a cross-namespace link
+    /// target — a veth peer or a vlan/tunnel parent in another network
+    /// namespace — ALWAYS carries an allocated netnsid in the dump, while
+    /// a same-namespace target never carries the attribute. `None` = the
+    /// kernel did not report the attribute; `Some(-1)` = reported as
+    /// present but unassigned (the kernel does not emit this for dumps;
+    /// the raw value is preserved rather than clamped).
+    ///
+    /// For veth interfaces the link target is the peer
+    /// ([`Self::peer_ifindex`]); for other kinds it is the parent
+    /// ([`Self::parent_ifindex`]). When this field is `Some(_)`, the
+    /// target lives in ANOTHER network namespace: its ifindex is scoped
+    /// to that namespace and can never be resolved to a local interface,
+    /// no matter which local ifindexes coincide.
+    #[serde(default)]
+    pub link_netnsid: Option<i32>,
     /// Providers that observed this interface, primary first.
     pub sources: Vec<ObservationSource>,
     /// Caveats recorded by providers (kept verbatim).

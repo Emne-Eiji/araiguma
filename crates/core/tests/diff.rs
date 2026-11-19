@@ -30,6 +30,7 @@ fn iface(ifindex: u32, name: &str, oper: OperState) -> Interface {
         master_ifindex: None,
         parent_ifindex: None,
         peer_ifindex: None,
+        link_netnsid: None,
         sources: vec![ObservationSource::Netlink],
         notes: vec![],
     }

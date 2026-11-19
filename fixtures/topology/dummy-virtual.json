@@ -39,6 +39,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 1,
         "defaultRoutes": 0,
         "sources": [
@@ -100,6 +101,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 3,
         "defaultRoutes": 1,
         "sources": [
@@ -144,6 +146,7 @@
         "masterIfindex": null,
         "parentIfindex": 2,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 1,
         "defaultRoutes": 0,
         "sources": [
@@ -187,6 +190,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 1,
         "defaultRoutes": 0,
         "sources": [
@@ -231,6 +235,7 @@
         "masterIfindex": 4,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [
@@ -275,6 +280,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": 7,
+        "linkNetnsid": null,
         "routesUsing": 1,
         "defaultRoutes": 0,
         "sources": [
@@ -318,6 +324,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": 6,
+        "linkNetnsid": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [
@@ -348,6 +355,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [
@@ -382,6 +390,7 @@
         "masterIfindex": null,
         "parentIfindex": null,
         "peerIfindex": null,
+        "linkNetnsid": null,
         "routesUsing": 0,
         "defaultRoutes": 0,
         "sources": [],
@@ -445,7 +454,7 @@
           "source": "netlink"
         }
       },
-      "detail": "veth peer (kernel-named ifindex)"
+      "detail": "veth peer (mutual kernel-named ifindexes, same namespace)"
     },
     {
       "from": {

@@ -325,6 +325,9 @@ fn read_one_interface(path: &Path, ifindex: u32, name: &str) -> Interface {
         master_ifindex: None,
         parent_ifindex: None,
         peer_ifindex: None,
+        // sysfs exposes no view of the link target's network namespace
+        // (no IFLA_LINK_NETNSID equivalent); the field stays not-observed.
+        link_netnsid: None,
         sources: vec![ObservationSource::SysFs],
         notes,
     }

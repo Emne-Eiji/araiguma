@@ -165,6 +165,9 @@ pub fn interface_changed_fields(old: &Interface, new: &Interface) -> Vec<String>
     if old.peer_ifindex != new.peer_ifindex {
         changed.push("peerIfindex".into());
     }
+    if old.link_netnsid != new.link_netnsid {
+        changed.push("linkNetnsid".into());
+    }
     changed
 }
 

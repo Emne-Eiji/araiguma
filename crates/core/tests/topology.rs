@@ -540,6 +540,7 @@ fn interface_fixture(ifindex: u32, name: &str, kind: &str) -> Interface {
         master_ifindex: None,
         parent_ifindex: None,
         peer_ifindex: None,
+        link_netnsid: None,
         sources: vec![ObservationSource::Netlink],
         notes: vec![],
     }
@@ -617,10 +618,14 @@ fn veth_peer_self_reference_is_invalid_not_an_edge() {
 }
 
 #[test]
-fn asymmetric_veth_peer_declaration_still_draws_one_edge() {
-    // Only veth0 names its peer (veth1 observed nothing about the
-    // relationship): the kernel's claim is enough — one edge, from the
-    // declaring side.
+fn asymmetric_veth_peer_declaration_is_not_an_edge() {
+    // WO-03-F / AUD-01 correction: only veth0 names a peer — veth1 was
+    // observed WITHOUT a reciprocal statement. A same-namespace veth peer
+    // always names its partner back (the kernel reports both endpoints in
+    // one dump), so a one-sided declaration does not establish the pair:
+    // the ifindex match could be an unrelated interface colliding with a
+    // cross-namespace peer's namespace-scoped ifindex. The observation is
+    // preserved as an annotation; no edge is drawn.
     let mut snapshot = fixture("empty");
     let mut a = interface_fixture(6, "veth0", "other");
     a.kind = InterfaceKind::Veth;
@@ -630,14 +635,213 @@ fn asymmetric_veth_peer_declaration_still_draws_one_edge() {
     snapshot.interfaces = vec![a, b];
 
     let doc = build_topology(&snapshot);
+    assert!(
+        !doc.edges.iter().any(|e| e.edge_kind == EdgeKind::VethPeer),
+        "an asymmetric declaration must not produce an edge"
+    );
+    let veth0 = doc.nodes.iter().find(|n| n.label == "veth0").unwrap();
+    assert!(veth0
+        .annotations
+        .iter()
+        .any(|a| a.contains("does not name this interface back")),);
+}
+
+#[test]
+fn same_namespace_veth_pair_draws_exactly_one_edge() {
+    // The legitimate same-namespace discovery (WO-03 M2 regression): both
+    // endpoints name each other (the kernel's mutual statement) and the
+    // kernel reported no link-netnsid — the pair is established, and one
+    // deduplicated edge represents it.
+    let mut snapshot = fixture("empty");
+    let mut a = interface_fixture(6, "veth0", "other");
+    a.kind = InterfaceKind::Veth;
+    a.peer_ifindex = Some(7);
+    let mut b = interface_fixture(7, "veth1", "other");
+    b.kind = InterfaceKind::Veth;
+    b.peer_ifindex = Some(6);
+    snapshot.interfaces = vec![a, b];
+
+    let doc = build_topology(&snapshot);
     let veth_edges: Vec<_> = doc
         .edges
         .iter()
         .filter(|e| e.edge_kind == EdgeKind::VethPeer)
         .collect();
     assert_eq!(veth_edges.len(), 1);
-    assert_eq!(veth_edges[0].from, interface(6));
-    assert_eq!(veth_edges[0].to, interface(7));
+    assert!(
+        (veth_edges[0].from == interface(6) && veth_edges[0].to == interface(7))
+            || (veth_edges[0].from == interface(7) && veth_edges[0].to == interface(6))
+    );
+    assert!(veth_edges[0]
+        .detail
+        .as_deref()
+        .is_some_and(|d| d.contains("mutual kernel-named ifindexes")));
+    // Both endpoints carry the peer in their node details.
+    let veth0 = doc.nodes.iter().find(|n| n.label == "veth0").unwrap();
+    assert_eq!(veth0.detail.peer_ifindex, Some(7));
+    assert_eq!(veth0.detail.link_netnsid, None);
+}
+
+#[test]
+fn cross_namespace_veth_peer_with_netnsid_never_draws_a_local_edge() {
+    // WO-03-F / AUD-01 — the audit's exact scenario: the kernel reported
+    // IFLA_LINK_NETNSID (the peer lives in another network namespace),
+    // while an unrelated LOCAL dummy happens to carry the same ifindex.
+    // The dummy must never be connected to the veth.
+    let mut snapshot = fixture("empty");
+    let mut veth = interface_fixture(4, "veth0", "other");
+    veth.kind = InterfaceKind::Veth;
+    veth.peer_ifindex = Some(2); // the peer's ifindex IN ITS OWN NAMESPACE
+    veth.link_netnsid = Some(0);
+    let dummy = interface_fixture(2, "dummy0", "dummy");
+    snapshot.interfaces = vec![veth, dummy];
+
+    let doc = build_topology(&snapshot);
+    assert!(
+        !doc.edges.iter().any(|e| e.edge_kind == EdgeKind::VethPeer),
+        "a cross-namespace peer must never resolve to a local interface"
+    );
+    let node = doc.nodes.iter().find(|n| n.label == "veth0").unwrap();
+    assert!(node
+        .annotations
+        .iter()
+        .any(|a| a.contains("lives in another network namespace")));
+    // The observation itself is preserved: peer ifindex AND its namespace
+    // context are part of the node details.
+    assert_eq!(node.detail.peer_ifindex, Some(2));
+    assert_eq!(node.detail.link_netnsid, Some(0));
+}
+
+#[test]
+fn cross_namespace_peer_with_colliding_local_veth_stays_unresolved() {
+    // Same audit scenario, but the colliding local interface is itself a
+    // veth (not a dummy). Matching interface KIND proves nothing: the
+    // kernel's netnsid statement wins and no edge is drawn.
+    let mut snapshot = fixture("empty");
+    let mut veth = interface_fixture(4, "veth0", "other");
+    veth.kind = InterfaceKind::Veth;
+    veth.peer_ifindex = Some(2);
+    veth.link_netnsid = Some(3);
+    let mut local_veth = interface_fixture(2, "vethX", "other");
+    local_veth.kind = InterfaceKind::Veth;
+    local_veth.peer_ifindex = Some(9); // an unrelated pair
+    snapshot.interfaces = vec![veth, local_veth];
+
+    let doc = build_topology(&snapshot);
+    assert!(!doc.edges.iter().any(|e| e.edge_kind == EdgeKind::VethPeer));
+    let node = doc.nodes.iter().find(|n| n.label == "veth0").unwrap();
+    assert!(node
+        .annotations
+        .iter()
+        .any(|a| a.contains("kernel netnsid 3")));
+}
+
+#[test]
+fn veth_ifindex_collision_without_netnsid_is_not_an_edge() {
+    // The missing-namespace-information case: no IFLA_LINK_NETNSID was
+    // reported (so the kernel did not place the peer in another namespace
+    // in this dump), but the local interface at the peer's ifindex is a
+    // veth pointing SOMEWHERE ELSE — it does not name this interface
+    // back, so it is not the peer. Without the mutual kernel statement
+    // the relationship is not established; it stays unresolved.
+    let mut snapshot = fixture("empty");
+    let mut a = interface_fixture(5, "veth0", "other");
+    a.kind = InterfaceKind::Veth;
+    a.peer_ifindex = Some(6);
+    let mut b = interface_fixture(6, "veth1", "other");
+    b.kind = InterfaceKind::Veth;
+    b.peer_ifindex = Some(7); // veth1's peer is ifindex 7, not veth0's 5
+    snapshot.interfaces = vec![a, b];
+
+    let doc = build_topology(&snapshot);
+    assert!(!doc.edges.iter().any(|e| e.edge_kind == EdgeKind::VethPeer));
+    let node = doc.nodes.iter().find(|n| n.label == "veth0").unwrap();
+    assert!(node
+        .annotations
+        .iter()
+        .any(|a| a.contains("does not name this interface back")));
+}
+
+#[test]
+fn veth_peer_ifindex_colliding_with_a_local_dummy_without_netnsid_is_not_an_edge() {
+    // The peer's ifindex matches an unrelated local DUMMY and no namespace
+    // information was reported. A dummy cannot be a veth peer at all —
+    // the evidence cannot establish the relationship, so nothing is drawn.
+    let mut snapshot = fixture("empty");
+    let mut veth = interface_fixture(5, "veth0", "other");
+    veth.kind = InterfaceKind::Veth;
+    veth.peer_ifindex = Some(6);
+    let dummy = interface_fixture(6, "dummy0", "dummy");
+    snapshot.interfaces = vec![veth, dummy];
+
+    let doc = build_topology(&snapshot);
+    assert!(!doc.edges.iter().any(|e| e.edge_kind == EdgeKind::VethPeer));
+    let node = doc.nodes.iter().find(|n| n.label == "veth0").unwrap();
+    assert!(node
+        .annotations
+        .iter()
+        .any(|a| a.contains("does not name this interface back")));
+}
+
+#[test]
+fn cross_namespace_parent_link_is_annotated_never_an_edge() {
+    // Section 5.4 (namespace-scoped identity everywhere): a vlan whose
+    // parent lives in another network namespace (IFLA_LINK_NETNSID
+    // reported) must not connect to a colliding local interface either.
+    let mut snapshot = fixture("empty");
+    let mut vlan = interface_fixture(4, "eth0.100", "other");
+    vlan.kind = InterfaceKind::Vlan;
+    vlan.parent_ifindex = Some(2);
+    vlan.link_netnsid = Some(1);
+    let eth = interface_fixture(2, "eth0", "ethernet");
+    snapshot.interfaces = vec![vlan, eth];
+
+    let doc = build_topology(&snapshot);
+    assert!(!doc
+        .edges
+        .iter()
+        .any(|e| e.edge_kind == EdgeKind::LinkParent));
+    let node = doc.nodes.iter().find(|n| n.label == "eth0.100").unwrap();
+    assert!(node
+        .annotations
+        .iter()
+        .any(|a| a.contains("parent link ifindex 2 lives in another network namespace")));
+}
+
+#[test]
+fn veth_peer_and_netnsid_serialize_into_snapshot_and_node_details() {
+    // Serialization contract (WO-03-F): linkNetnsid is carried by the
+    // snapshot and the topology node details, round-trips through JSON,
+    // and stays optional (absent = not observed) for pre-existing v3
+    // documents.
+    let mut snapshot = fixture("empty");
+    let mut veth = interface_fixture(6, "veth0", "other");
+    veth.kind = InterfaceKind::Veth;
+    veth.peer_ifindex = Some(9);
+    veth.link_netnsid = Some(2);
+    snapshot.interfaces = vec![veth];
+
+    let json = serde_json::to_string(&snapshot).unwrap();
+    assert!(json.contains("\"linkNetnsid\":2"), "{json}");
+    let reparsed: NetworkSnapshot = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        reparsed.interfaces[0].link_netnsid,
+        Some(2),
+        "round-trip preserves the netnsid"
+    );
+    let doc = build_topology(&reparsed);
+    let node = doc.nodes.iter().find(|n| n.label == "veth0").unwrap();
+    assert_eq!(node.detail.peer_ifindex, Some(9));
+    assert_eq!(node.detail.link_netnsid, Some(2));
+
+    // A pre-WO-03-F v3 document (no linkNetnsid key) still parses, with
+    // the field not observed.
+    let legacy = json
+        .replace("\"linkNetnsid\":2,", "")
+        .replace("\"linkNetnsid\":null,", "");
+    let legacy_doc: NetworkSnapshot = serde_json::from_str(&legacy)
+        .expect("documents without linkNetnsid parse (field defaults)");
+    assert_eq!(legacy_doc.interfaces[0].link_netnsid, None);
 }
 
 #[test]

@@ -28,6 +28,7 @@ function iface(overrides: Partial<Interface>): Interface {
     masterIfindex: null,
     parentIfindex: null,
     peerIfindex: null,
+    linkNetnsid: null,
     sources: ['netlink'],
     notes: [],
     ...overrides,

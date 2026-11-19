@@ -238,6 +238,7 @@ const baseNode = {
     masterIfindex: null,
     parentIfindex: null,
     peerIfindex: null,
+    linkNetnsid: null,
     routesUsing: 1,
     defaultRoutes: 1,
     sources: ['netlink'],
@@ -408,6 +409,72 @@ describe('topology validation: nodes, edges, references', () => {
     ).toThrow(/\$.edges/);
     expect(() => parseTopology({ schemaVersion: 2, nodes: [], edges: [] })).toThrow(
       /sourceTimestampMs/,
+    );
+  });
+});
+
+describe('linkNetnsid validation (WO-03-F / AUD-01)', () => {
+  it('accepts a veth interface carrying a peer and its netnsid', () => {
+    const doc = snapshotWith((d) => {
+      (d.interfaces as Array<Record<string, unknown>>)[0] = {
+        ...(d.interfaces as Array<Record<string, unknown>>)[0],
+        kind: 'veth',
+        peerIfindex: 7,
+        linkNetnsid: 0,
+      };
+    });
+    expect(() => parseSnapshot(doc)).not.toThrow();
+  });
+
+  it('accepts an unassigned netnsid (-1) and rejects out-of-range values', () => {
+    const withUnassigned = snapshotWith((d) => {
+      (d.interfaces as Array<Record<string, unknown>>)[0] = {
+        ...(d.interfaces as Array<Record<string, unknown>>)[0],
+        linkNetnsid: -1,
+      };
+    });
+    expect(() => parseSnapshot(withUnassigned)).not.toThrow();
+
+    const tooLarge = snapshotWith((d) => {
+      (d.interfaces as Array<Record<string, unknown>>)[0] = {
+        ...(d.interfaces as Array<Record<string, unknown>>)[0],
+        linkNetnsid: 2147483648,
+      };
+    });
+    expect(() => parseSnapshot(tooLarge)).toThrow(
+      /interfaces\[0\]\.linkNetnsid: expected an integer <= 2147483647/,
+    );
+
+    const fractional = snapshotWith((d) => {
+      (d.interfaces as Array<Record<string, unknown>>)[0] = {
+        ...(d.interfaces as Array<Record<string, unknown>>)[0],
+        linkNetnsid: 0.5,
+      };
+    });
+    expect(() => parseSnapshot(fractional)).toThrow(
+      /interfaces\[0\]\.linkNetnsid: expected an integer/,
+    );
+  });
+
+  it('topology node details carry linkNetnsid with the same rules', () => {
+    const withNetnsid = {
+      ...baseNode,
+      detail: { ...baseNode.detail, peerIfindex: 9, linkNetnsid: 2 },
+    };
+    expect(() => parseTopology(topologyWith([withNetnsid], []))).not.toThrow();
+
+    const unassigned = {
+      ...baseNode,
+      detail: { ...baseNode.detail, linkNetnsid: -1 },
+    };
+    expect(() => parseTopology(topologyWith([unassigned], []))).not.toThrow();
+
+    const bad = {
+      ...baseNode,
+      detail: { ...baseNode.detail, linkNetnsid: 'zero' },
+    };
+    expect(() => parseTopology(topologyWith([bad], []))).toThrow(
+      /nodes\[0\]\.detail\.linkNetnsid: expected an integer/,
     );
   });
 });

@@ -144,6 +144,11 @@ pub struct NodeDetail {
     pub parent_ifindex: Option<u32>,
     /// veth peer ifindex, when the kernel named one (interface nodes only).
     pub peer_ifindex: Option<u32>,
+    /// Netnsid of the namespace containing the link target (veth peer, or
+    /// parent for other kinds) when the kernel reported one
+    /// (`IFLA_LINK_NETNSID`); `None` = not reported (WO-03-F / AUD-01).
+    #[serde(default)]
+    pub link_netnsid: Option<i32>,
     /// Routes whose output interface is this node (interface nodes only).
     pub routes_using: usize,
     /// Default routes among them.
@@ -261,10 +266,24 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
                 );
             }
         }
-        // veth peer relationships (WO-03 M2): only for interfaces the kernel
-        // itself classified as veth, and only when the peer is part of this
-        // observation. A peer outside the snapshot (possibly in another
-        // network namespace) is an annotation, never an invented edge.
+        // veth peer relationships (WO-03 M2; namespace identity corrected by
+        // WO-03-F / AUD-01). ifindex is NAMESPACE-SCOPED: a peer ifindex never
+        // identifies an interface of this observation on its own. The edge is
+        // drawn only when the evidence establishes the relationship:
+        //
+        // * `IFLA_LINK_NETNSID` present (link_netnsid Some) — the kernel
+        //   itself states the peer lives in ANOTHER network namespace. The
+        //   peer is not part of this observation; an unrelated local
+        //   interface that happens to carry the same ifindex is NEVER
+        //   connected. The peer stays explicitly unresolved.
+        // * netnsid absent — on this kernel a cross-namespace peer always
+        //   carries an allocated netnsid (verified live), so absence places
+        //   the peer in THIS namespace. The local interface at the peer
+        //   ifindex is then the peer (ifindex uniqueness within a namespace)
+        //   — but only if the kernel's own mutual statement confirms it:
+        //   the candidate must itself be a veth naming THIS interface as its
+        //   peer. A bare ifindex match (an unrelated dummy or veth with a
+        //   colliding ifindex) cannot satisfy that and draws nothing.
         if iface.kind == InterfaceKind::Veth {
             if let Some(peer) = iface.peer_ifindex {
                 if peer == iface.ifindex {
@@ -273,43 +292,91 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
                         iface.ifindex,
                         "names itself as veth peer (ifindex {peer}) — an invalid reference; no relationship drawn".to_string(),
                     );
-                } else if snapshot.interface_by_ifindex(peer).is_some() {
-                    // Deduplicate: when both endpoints name each other, one
-                    // edge represents the pair (from the lower ifindex).
-                    let already_drawn = edges.iter().any(|e| {
-                        e.edge_kind == EdgeKind::VethPeer
-                            && ((e.from == NodeId::Interface { ifindex: peer }
-                                && e.to
-                                    == NodeId::Interface {
-                                        ifindex: iface.ifindex,
-                                    })
-                                || (e.from
-                                    == NodeId::Interface {
-                                        ifindex: iface.ifindex,
-                                    }
-                                    && e.to == NodeId::Interface { ifindex: peer }))
-                    });
-                    if !already_drawn {
-                        edges.push(TopologyEdge {
-                            from: NodeId::Interface {
-                                ifindex: iface.ifindex,
-                            },
-                            to: NodeId::Interface { ifindex: peer },
-                            edge_kind: EdgeKind::VethPeer,
-                            evidence: Evidence::Observed {
-                                source: primary_source(&iface.sources),
-                            },
-                            detail: Some("veth peer (kernel-named ifindex)".to_string()),
-                        });
-                    }
-                } else {
+                } else if let Some(netnsid) = iface.link_netnsid {
+                    // The kernel states the peer is in another network
+                    // namespace. Never a local edge — a local ifindex
+                    // coincidence is meaningless across namespaces.
                     annotate_interface(
                         &mut nodes,
                         iface.ifindex,
                         format!(
-                            "veth peer ifindex {peer} is not part of this observation (it may live in another network namespace); no relationship drawn"
+                            "veth peer ifindex {peer} lives in another network namespace (kernel netnsid {netnsid}); the peer is not part of this observation — no relationship drawn"
                         ),
                     );
+                } else {
+                    match snapshot
+                        .interfaces
+                        .iter()
+                        .find(|candidate| candidate.ifindex == peer)
+                    {
+                        Some(candidate)
+                            if candidate.kind == InterfaceKind::Veth
+                                && candidate.peer_ifindex == Some(iface.ifindex)
+                                && candidate.link_netnsid.is_none() =>
+                        {
+                            // Mutual kernel statements with no cross-namespace
+                            // marker: both endpoints name each other. One edge
+                            // represents the pair (from the lower ifindex).
+                            let already_drawn = edges.iter().any(|e| {
+                                e.edge_kind == EdgeKind::VethPeer
+                                    && ((e.from == NodeId::Interface { ifindex: peer }
+                                        && e.to
+                                            == NodeId::Interface {
+                                                ifindex: iface.ifindex,
+                                            })
+                                        || (e.from
+                                            == NodeId::Interface {
+                                                ifindex: iface.ifindex,
+                                            }
+                                            && e.to == NodeId::Interface { ifindex: peer }))
+                            });
+                            if !already_drawn {
+                                edges.push(TopologyEdge {
+                                    from: NodeId::Interface {
+                                        ifindex: iface.ifindex,
+                                    },
+                                    to: NodeId::Interface { ifindex: peer },
+                                    edge_kind: EdgeKind::VethPeer,
+                                    evidence: Evidence::Observed {
+                                        source: primary_source(&iface.sources),
+                                    },
+                                    detail: Some(
+                                        "veth peer (mutual kernel-named ifindexes, same namespace)"
+                                            .to_string(),
+                                    ),
+                                });
+                            }
+                        }
+                        Some(candidate) => {
+                            // An interface with the peer's ifindex exists
+                            // locally, but it is not the peer: a same-
+                            // namespace veth peer would itself be a veth
+                            // naming this interface back. Either the true peer
+                            // is in another namespace the dump could not mark
+                            // (no netnsid observed), or the observation is
+                            // incomplete — both stay unresolved rather than
+                            // guessed.
+                            annotate_interface(
+                                &mut nodes,
+                                iface.ifindex,
+                                format!(
+                                    "names veth peer ifindex {peer}, but interface \"{}\" at that ifindex does not name this interface back — the true peer is not established (it may live in another network namespace); no relationship drawn",
+                                    candidate.name
+                                ),
+                            );
+                        }
+                        None => {
+                            // The peer itself is unobserved: keep the node,
+                            // record the unknown, draw no dangling edge.
+                            annotate_interface(
+                                &mut nodes,
+                                iface.ifindex,
+                                format!(
+                                    "veth peer ifindex {peer} is not part of this observation (it may live in another network namespace); no relationship drawn"
+                                ),
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -329,6 +396,17 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
                         ),
                     );
                 }
+            } else if let Some(netnsid) = iface.link_netnsid {
+                // The parent link lives in another network namespace
+                // (IFLA_LINK_NETNSID): its ifindex is namespace-scoped and
+                // never resolves to a local interface, even on collision.
+                annotate_interface(
+                    &mut nodes,
+                    iface.ifindex,
+                    format!(
+                        "parent link ifindex {parent} lives in another network namespace (kernel netnsid {netnsid}); no relationship drawn"
+                    ),
+                );
             } else if parent == iface.ifindex {
                 annotate_interface(
                     &mut nodes,
@@ -631,6 +709,7 @@ fn interface_node(snapshot: &NetworkSnapshot, iface: &Interface) -> TopologyNode
             master_ifindex: iface.master_ifindex,
             parent_ifindex: iface.parent_ifindex,
             peer_ifindex: iface.peer_ifindex,
+            link_netnsid: iface.link_netnsid,
             routes_using: routes_using.len(),
             default_routes,
             sources: iface.sources.clone(),

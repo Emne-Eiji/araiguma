@@ -128,6 +128,13 @@ function validateNode(raw: unknown, path: string): ValidatedNode {
     );
   }
   optional((v, p) => asInt(v, p, { min: 1 }), detail.peerIfindex, `${path}.detail.peerIfindex`);
+  // IFLA_LINK_NETNSID on the node's interface: signed 32-bit, null/absent
+  // = not reported (WO-03-F / AUD-01).
+  optional(
+    (v, p) => asInt(v, p, { min: -2147483648, max: 2147483647 }),
+    detail.linkNetnsid,
+    `${path}.detail.linkNetnsid`,
+  );
   optional((v, p) => asInt(v, p, { min: 0 }), detail.mtu, `${path}.detail.mtu`);
   optional(asStringArray, detail.notes, `${path}.detail.notes`);
   asArray(detail.sources, `${path}.detail.sources`);
