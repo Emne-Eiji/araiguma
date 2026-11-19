@@ -56,6 +56,19 @@ WORK=/tmp/araiguma-fresh-work
 LOGS=/tmp/araiguma-fresh-test-logs
 KEEP_LOGS="${ARIGUMA_TEST_LOG_DIR:-/tmp/araiguma-test-logs}"
 
+# Toolchain location: the shared sandbox toolchain next to the PRIMARY
+# checkout (resolved through the primary's env.sh). The clone lives in /tmp
+# and cannot find it by the default sibling rule — without this, the
+# clone's bootstrap would install a private toolchain on every run (and a
+# `--profile minimal` one at that, which lacks rustfmt/clippy). The
+# toolchain is an environment dependency (like node itself), not project
+# content: sharing it is the documented sandbox behavior
+# (docs/development.md). On a genuinely bare machine the bootstrap still
+# installs its own — complete with the components the workflow needs.
+# shellcheck source=scripts/env.sh disable=SC1091
+source scripts/env.sh
+export ARIGUMA_TOOLCHAINS
+
 cleanup() {
   local rc=$?
   rm -rf "$CLONE_AREA" "$TARGET" "$WORK" "$LOGS"

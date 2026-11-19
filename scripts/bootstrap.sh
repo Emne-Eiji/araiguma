@@ -20,7 +20,12 @@ else
     sh /tmp/rustup-init.sh -y --profile minimal --no-modify-path \
        --default-toolchain "$channel"
   source scripts/env.sh
-  log "rust installed: $(cargo --version)"
+  # The documented workflow needs rustfmt and clippy (scripts/test-all.sh);
+  # the minimal profile installs neither. Add them so a genuinely fresh
+  # machine can run the complete validation (WO-03-FC / AUD-04).
+  RUSTUP_HOME="$ARIGUMA_TOOLCHAINS/rustup" CARGO_HOME="$ARIGUMA_TOOLCHAINS/cargo" \
+    rustup component add rustfmt clippy
+  log "rust installed: $(cargo --version) (+ rustfmt, clippy)"
 fi
 
 # --- 2. Cargo dependencies (fetch only; extraction is ephemeral) -----------
