@@ -27,18 +27,22 @@ export function hopCount(route: Route): number {
 }
 
 export interface TableOption {
-  table: number;
+  /** The routing-table id, or `null` for routes whose table was NOT
+   * observed (e.g. table-less procfs rows) — never folded into main. */
+  table: number | null;
   label: string;
   count: number;
 }
 
 // All routing tables present in the snapshot, with counts. The main table
 // is always first (and always present in the selector, even when empty, so
-// the default view is explicit).
+// the default view is explicit). Routes whose table was NOT observed get
+// their own explicit group at the end — presenting them under main would
+// falsely imply a table the source never exposed (WO-03-F / AUD-03).
 export function tableOptions(snapshot: NetworkSnapshot): TableOption[] {
-  const counts = new Map<number, number>();
+  const counts = new Map<number | null, number>();
   for (const route of snapshot.routes) {
-    const table = route.table ?? MAIN_TABLE;
+    const table = route.table;
     counts.set(table, (counts.get(table) ?? 0) + 1);
   }
   const options: TableOption[] = [
@@ -48,10 +52,19 @@ export function tableOptions(snapshot: NetworkSnapshot): TableOption[] {
       count: counts.get(MAIN_TABLE) ?? 0,
     },
   ];
-  for (const [table, count] of [...counts.entries()].sort((a, b) => a[0] - b[0])) {
-    if (table !== MAIN_TABLE) {
-      options.push({ table, label: tableLabel(table), count });
-    }
+  const numbered = [...counts.entries()]
+    .filter(([table]) => table !== null && table !== MAIN_TABLE)
+    .sort((a, b) => (a[0] as number) - (b[0] as number));
+  for (const [table, count] of numbered) {
+    options.push({ table, label: tableLabel(table as number), count });
+  }
+  const notObserved = counts.get(null) ?? 0;
+  if (notObserved > 0) {
+    options.push({
+      table: null,
+      label: 'table not observed',
+      count: notObserved,
+    });
   }
   return options;
 }
@@ -70,14 +83,16 @@ export function tableLabel(table: number): string {
 }
 
 // The routes shown for the selected tables. The default selection is the
-// main table only — other tables are never deleted, they are simply not
-// part of the default presentation.
+// main table plus the not-observed group when present (nothing observed is
+// ever hidden by default); other tables are never deleted, they are simply
+// not part of the default presentation.
 export function visibleRoutes(
   snapshot: NetworkSnapshot,
-  selectedTables: number[],
+  selectedTables: Array<number | null>,
 ): Route[] {
-  const selected = new Set(selectedTables.length > 0 ? selectedTables : [MAIN_TABLE]);
-  return snapshot.routes.filter((route) => selected.has(route.table ?? MAIN_TABLE));
+  const selected =
+    selectedTables.length > 0 ? new Set(selectedTables) : new Set<number | null>([MAIN_TABLE]);
+  return snapshot.routes.filter((route) => selected.has(route.table));
 }
 
 export function routeKey(route: Route, index: number): string {

@@ -57,10 +57,16 @@ describe('route table filtering', () => {
 
   it('empty route observations are valid', () => {
     const empty = fixtures['incomplete-observations'].snapshot;
-    // 3 procfs v4 + 3 procfs v6 (WO-03 M4): the file-spanning-tables
-    // routes with table null group with main for display.
-    expect(visibleRoutes(empty, [254]).length).toBe(6);
-    expect(tableOptions(empty).map((t) => t.table)).toEqual([254]);
+    // 3 procfs v4 (main) + 3 procfs v6 (table NOT observed). The table-less
+    // rows get their own explicit group — never folded into main, which
+    // would imply a table the source never exposed (WO-03-F / AUD-03).
+    expect(visibleRoutes(empty, [254]).length).toBe(3);
+    expect(visibleRoutes(empty, [null]).length).toBe(3);
+    expect(visibleRoutes(empty, [254, null]).length).toBe(6);
+    expect(tableOptions(empty).map((t) => t.table)).toEqual([254, null]);
+    expect(tableOptions(empty).find((t) => t.table === null)!.label).toBe(
+      'table not observed',
+    );
   });
 });
 

@@ -23,19 +23,40 @@
     onselect: (route: Route | null) => void;
   } = $props();
 
-  // The default presentation shows the main table only; other tables are
-  // opt-in through the visible selector below. Nothing is ever discarded.
-  let selectedTables = $state<number[]>([MAIN_TABLE]);
+  // The default presentation shows the main table plus any not-observed
+  // group (table-less observations are never hidden by default); other
+  // tables are opt-in through the selector below. Nothing is discarded.
+  let selectedTables = $state<Array<number | null>>([MAIN_TABLE]);
   const tables = $derived(tableOptions(snapshot));
+  const notObservedTable = $derived(tables.find((t) => t.table === null));
+  $effect(() => {
+    // The not-observed group joins the default selection when it appears
+    // (it only exists when the snapshot carries table-less routes).
+    if (notObservedTable && !selectedTables.includes(null)) {
+      selectedTables = [...selectedTables, null];
+    }
+  });
   const routes = $derived(visibleRoutes(snapshot, selectedTables));
   const otherTableCount = $derived(
-    tables.filter((t) => t.table !== MAIN_TABLE).reduce((sum, t) => sum + t.count, 0),
+    tables
+      .filter((t) => t.table !== MAIN_TABLE && t.table !== null)
+      .reduce((sum, t) => sum + t.count, 0),
   );
 
-  function toggleTable(table: number) {
-    selectedTables = selectedTables.includes(table)
+  function tableChipKey(table: number | null): string {
+    return table === null ? 'unknown' : String(table);
+  }
+
+  function toggleTable(table: number | null) {
+    const isSelected = selectedTables.includes(table);
+    const next = isSelected
       ? selectedTables.filter((t) => t !== table)
-      : [...selectedTables, table].sort((a, b) => a - b);
+      : [...selectedTables, table];
+    selectedTables = [...next].sort((a, b) => {
+      if (a === null) return 1;
+      if (b === null) return -1;
+      return (a as number) - (b as number);
+    });
   }
 
   function toggleRoute(route: Route) {
@@ -96,7 +117,7 @@
 
   <div class="filter-row" role="group" aria-label="Routing table filter">
     <span class="filter-label">Tables:</span>
-    {#each tables as option (option.table)}
+    {#each tables as option (tableChipKey(option.table))}
       <button
         class="table-chip"
         class:active={selectedTables.includes(option.table)}
@@ -108,8 +129,8 @@
       </button>
     {/each}
     <span class="filter-note">
-      the default view shows the main table (254) only — other tables stay
-      available, unmerged and clearly labeled
+      the default view shows the main table (254) and any table-less
+      observations — other tables stay available, unmerged and clearly labeled
     </span>
   </div>
 
