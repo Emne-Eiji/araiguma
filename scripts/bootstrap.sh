@@ -36,7 +36,34 @@ else
   log "workspace has no crates yet; skipping cargo fetch"
 fi
 
-# --- 3. Frontend tooling (ephemeral work copy; see scripts/frontend.sh) ----
+# --- 3. Fixture trees (WO-03-F / AUD-04) -----------------------------------
+# The sysfs/procfs fixture trees contain EMPTY directories (wireless/,
+# bridge/, class/net for the empty scenario) that Git cannot track. A
+# fresh clone therefore lacks them and three sysfs tests fail until the
+# generator runs. Generation is part of the documented bootstrap: it is
+# idempotent, deterministic, and verified after running — the full test
+# suite never depends on undocumented manual preparation.
+if [ -f scripts/gen-sysfs-fixtures.sh ]; then
+  log "generating sysfs/procfs fixture trees"
+  ./scripts/gen-sysfs-fixtures.sh
+  # Verify every empty-directory fixture actually exists; a generator that
+  # silently stopped early must fail the bootstrap loudly.
+  for required_dir in \
+    fixtures/sysfs/basic-workstation/class/net/wlan0/wireless \
+    fixtures/sysfs/combined-laptop/class/net/wlan0/wireless \
+    fixtures/sysfs/virtual-interfaces/class/net/br0/bridge \
+    fixtures/sysfs/empty/class/net; do
+    if [ ! -d "$required_dir" ]; then
+      echo "bootstrap: fixture directory missing after generation: $required_dir" >&2
+      exit 1
+    fi
+  done
+  log "fixture trees verified (empty-directory fixtures present)"
+else
+  log "no fixture generator found (non-repository layout?); skipping"
+fi
+
+# --- 4. Frontend tooling (ephemeral work copy; see scripts/frontend.sh) ----
 if [ -f apps/frontend/package.json ]; then
   scripts/frontend.sh prepare
 fi

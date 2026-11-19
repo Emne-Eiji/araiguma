@@ -56,6 +56,10 @@ fixtures_stable()   {
   ./scripts/gen-topology-fixtures.sh >/dev/null
   git diff --exit-code -- fixtures/
 }
+# WO-03-F / AUD-04: a genuinely fresh clone of the COMMITTED state must
+# bootstrap and pass tests with no manual fixture preparation. Runs late
+# in the suite (it recompiles in an isolated target directory).
+fresh_clone()     { scripts/check-fresh-clone.sh; }
 rust_fmt()          { cargo fmt --all -- --check; }
 rust_clippy()       {
   cargo clippy --workspace --all-targets -- -D warnings > "$LOG_DIR/clippy.log" 2>&1
@@ -144,6 +148,7 @@ step "private D-Bus harness check" dbus_harness
 step "live observation + iproute2 cross-validation" live_observation
 step "live CLI documents through the frontend validators" frontend_live_docs
 step "git identity audit" git_identity
+step "fresh-clone bootstrap and tests (AUD-04)" fresh_clone
 
 echo
 echo "════ summary ════"

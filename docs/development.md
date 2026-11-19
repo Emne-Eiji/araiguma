@@ -4,12 +4,20 @@
 
 ```sh
 source scripts/env.sh   # every shell: toolchain + ephemeral build paths
-./scripts/bootstrap.sh  # idempotent: toolchain, cargo fetch, frontend work copy
+./scripts/bootstrap.sh  # idempotent: toolchain, cargo fetch, fixtures, frontend work copy
 ```
 
 `bootstrap.sh` re-creates all ephemeral state after a sandbox recycle
 (CARGO_TARGET_DIR, CARGO_HOME with the persistent crate-cache link, npm
-cache, frontend work copy, Playwright browsers on demand).
+cache, frontend work copy, Playwright browsers on demand) **and generates
+the sysfs/procfs fixture trees** (WO-03-F / AUD-04): several fixtures are
+EMPTY directories (`wlan0/wireless`, `br0/bridge`, the empty-observation
+`class/net`) that Git cannot track, so a fresh clone relies on the
+bootstrap to create them — generation is deterministic, idempotent, and
+verified after running. There is exactly ONE documented setup path; no
+manual fixture preparation is ever needed, and
+`scripts/check-fresh-clone.sh` (part of `test-all.sh`) proves it by
+cloning the committed state, bootstrapping, and running the test suites.
 
 ## Everyday commands
 

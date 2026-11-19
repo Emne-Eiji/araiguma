@@ -44,10 +44,17 @@ merge conflict.
 | Observation | Path |
 |---|---|
 | IPv6 addresses + scope + flags | `/proc/net/if_inet6` |
-| Main-table IPv4 routes | `/proc/net/route` |
+| Main-table IPv4 routes (first hop of multipath only) | `/proc/net/route` |
+| IPv6 routes across ALL tables (no table column) | `/proc/net/ipv6_route` |
 
-`/proc/net/ipv6_route` also exists but is not parsed (documented possible
-future work); IPv6 routes therefore come only from netlink today.
+**Correction (WO-03-F / AUD-11):** an earlier revision of this table stated
+that `/proc/net/ipv6_route` is not parsed and that IPv6 routes come only
+from netlink. That was accurate when written (WO-01R) but became stale
+when WO-03 M4 implemented the parser; the correction is recorded here
+rather than by rewriting history. Current behavior: the file IS parsed
+(see kernel behavior 14), with its table-less ambiguity preserved
+honestly (duplicate rows are never silently deduplicated — WO-03-F /
+AUD-03).
 
 ## Known kernel behaviors the code depends on
 
@@ -103,6 +110,16 @@ future work); IPv6 routes therefore come only from netlink today.
     missing file means not observed. Verified live: loopback reports its
     all-zero address as a real value (`Present("00:00:00:00:00:00")` — the
     kernel's own claim, reported as-is), wireguard reports none.
+    *Scope of the "absent" claim (WO-03-F §5.1 review, no defect found):*
+    it holds for the plain dumps Araiguma performs. The kernel emits
+    `IFLA_ADDRESS` in an unfiltered `RTM_GETLINK` dump exactly when the
+    device has a nonzero hardware address length (`addr_len`), and
+    Araiguma sets no `ext_filter_mask` that could suppress the attribute —
+    so within a successfully translated message, "attribute not supplied"
+    and "attribute not collected" cannot occur; a failed or filtered dump
+    produces no translated observation at all and is reported at the
+    section level. The three states therefore remain distinct at the
+    observation boundary this application actually uses.
 11. **Netlink receive-buffer overrun** (`ENOBUFS`): when notifications
     arrive faster than the socket drains, the kernel drops messages and
     the next receive returns ENOBUFS, which the netlink codec surfaces as
@@ -123,8 +140,15 @@ future work); IPv6 routes therefore come only from netlink today.
     verified live inside a netns with `ip route add ... nexthop ... weight
     2/3`). `/proc/net/route` shows only the FIRST hop of a multipath
     route (verified live), so a procfs observation is a partial view of
-    the same kernel route — the merge treats overlapping next-hop sets as
-    the same route rather than counting it twice (WO-03 M3).
+    the same kernel route. **Correction (WO-03-F / AUD-02):** the
+    original wording here said the merge "treats overlapping next-hop
+    sets as the same route" — that rule collapsed distinct ECMP routes
+    (`ip route append` holds two same-key routes whose hop sets overlap;
+    reproduced live, the second route was silently lost). The corrected
+    rule: overlapping hops prove NOTHING; a procfs row reconciles with a
+    netlink route only when that route is the UNIQUE match, and two
+    netlink observations are the same route only when every discriminator
+    agrees AND the complete hop sets are equal.
 14. **`/proc/net/ipv6_route` format** (WO-03 M4, verified live on kernel
     5.10 and cross-checked with `ip -6 route`): columns
     `dst dst_len src src_len nexthop metric refcnt use flags dev`, every
@@ -136,11 +160,42 @@ future work); IPv6 routes therefore come only from netlink today.
     local, ...) with NO table column — the table is not observable and
     the model records `None` with a note. It also contains the kernel's
     unreachable-default sentinels (`::/0`, metric `ffffffff`, flags
-    `RTF_NONEXTHOP|RTF_REJECT`) — printed twice on this kernel and NOT
-    included in netlink dumps; they are kept as honest procfs-only
-    observations. iproute2 omits `proto boot` from its display (boot is
-    the default display protocol), so a protocol cross-check stays at the
-    model level.
+    `RTF_NONEXTHOP|RTF_REJECT`) — printed TWICE on this kernel (one per
+    table) and NOT included in netlink dumps; both copies are kept as
+    honest procfs-only observations (WO-03-F / AUD-03: the file cannot
+    prove the identical rows are one route, so the multiplicity is
+    preserved and annotated, never silently deduplicated). iproute2 omits
+    `proto boot` from its display (boot is the default display protocol),
+    so a protocol cross-check stays at the model level.
+15. **`IFLA_LINK_NETNSID` separates cross-namespace from same-namespace
+    link targets** (WO-03-F / AUD-01, verified live on kernel 5.10): a
+    veth peer (or vlan/tunnel parent) living in ANOTHER network namespace
+    ALWAYS carries an allocated netnsid in the link dump (`link-netnsid
+    N` in `ip -d link`), while a same-namespace target never carries the
+    attribute. The kernel also re-allocates a device's ifindex when it is
+    moved into a namespace where its old ifindex is taken — so a
+    cross-namespace peer's ifindex can EQUAL an unrelated local
+    interface's ifindex (reproduced live: a false vethPeer edge was drawn
+    to an unrelated dummy). Consequences: ifindex is namespace-scoped and
+    never resolves a peer on its own; a netnsid states the target is
+    elsewhere (annotation only); without a netnsid, a same-namespace pair
+    is drawn only on the kernel's MUTUAL statements (both endpoints name
+    each other).
+16. **`ip route append` holds several routes under one superficial key**
+    (WO-03-F / AUD-02, verified live): two routes with the same
+    destination, table, and metric coexist with different next-hop sets —
+    including overlapping first hops. Route identity therefore requires
+    the full discriminator set (family, destination, table, metric,
+    protocol, scope, type, `rtm_tos`, flags) AND the complete next-hop
+    representation; `rtm_tos` is part of the kernel's route key and is
+    represented in the model.
+17. **`RTA_VIA` is a next-hop encoding with its own address family**
+    (WO-03-F / AUD-13): used by MPLS and encapsulation routes, it may
+    carry an address of the OTHER family than the route (or non-IP
+    AF_PACKET bytes). It is distinct from `RTA_GATEWAY` and is preserved
+    verbatim; a via-carrying route is never on-link. Constructed-message
+    tests cover the shapes; this 5.10 sandbox kernel produces no live
+    instance (no MPLS routes installed).
 
 ## Not observable (today, honestly reported as not observed)
 

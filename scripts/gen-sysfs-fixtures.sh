@@ -11,6 +11,14 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)/fixtures"
 
+# Safety (WO-03-F / AUD-04): this script writes a fixed set of paths under
+# the repository's fixtures/ tree ONLY. Refuse to run anywhere else — a
+# stray copy must never overwrite unrelated data.
+if [ ! -f "$(dirname "$0")/../Cargo.toml" ] || [ ! -d "$ROOT/sysfs" ]; then
+  echo "gen-sysfs-fixtures.sh: refusing to run — '$ROOT' is not a repository fixtures tree" >&2
+  exit 1
+fi
+
 write() { # write <file> <content>
   mkdir -p "$(dirname "$1")"
   printf '%s\n' "$2" > "$1"

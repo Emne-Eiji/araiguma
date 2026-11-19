@@ -134,22 +134,29 @@ IPv6 routes" (absence of the file is not evidence about the route table).
    may fill.
 3. Cross-source duplicates (same kernel fact seen by netlink and procfs)
    deduplicate into one item with a united `sources` list. Route identity
-   (WO-03 M3) is two-level: a group key (family, table — procfs's implied
-   main 254 equals netlink's explicit 254, destination, metric) plus
-   next-hop-set overlap — within a group, two observations are the same
-   kernel route when any next hop matches (name and ifindex normalized
-   through the merged interface list). This is what makes procfs's
-   first-hop-only view of a multipath route (`/proc/net/route` shows only
-   the first hop — verified live) merge into the netlink multipath
-   observation instead of appearing as a separate route. Identical
-   `Undecoded` markers also deduplicate; a partial single-path view never
-   writes route-level gateway/oif onto a multipath observation.
-   One evidence-based table rule (WO-03 M4): `/proc/net/ipv6_route` has no
-   table column (`table: None` — unknown, spanning main/local/...), so a
-   table-less observation matches a knowing observation on family +
-   destination + metric + next hop, and the merged route keeps the table
-   the knowing side observed. Two observations that both observed their
-   tables never merge across different tables.
+   (redesigned by WO-03-F / AUD-02 — the previous "next-hop-set overlap"
+   rule collapsed distinct ECMP routes the kernel holds under one
+   superficial key, verified live with `ip route append`) is two-level
+   and evidence-based:
+   - Two netlink observations are the same kernel route only when every
+     observed discriminator agrees — family, destination, table, metric,
+     protocol, scope, type, TOS (`rtm_tos`), flags — AND the complete
+     next-hop representations are equal (gateway, via, output interface,
+     weight, hop flags). Overlapping hop sets prove nothing. Identical
+     `Undecoded` markers deduplicate; a partial single-path view never
+     writes route-level gateway/oif onto a multipath observation.
+   - A procfs row reconciles with a netlink route only when that route is
+     the UNIQUE unused match on family + destination + metric (+ the
+     row's table requirement: v4 rows imply main, v6 rows expose no
+     table) with the row's first hop contained in the route's hop set —
+     `/proc/net/route` shows only the first hop of a multipath route
+     (verified live). Multiple candidate matches are never resolved by
+     iteration order: the row stays an independent observation with an
+     explicit ambiguity note (AUD-05). Identical duplicate table-less
+     rows (e.g. the kernel's twice-printed IPv6 unreachable-default
+     sentinel) are never silently deduplicated — the file cannot prove
+     they are one route, so the multiplicity is preserved and annotated
+     (AUD-03).
 4. Output-interface enrichment: merged routes carry both ifindex and name
    when either is resolvable — including every multipath hop.
 
