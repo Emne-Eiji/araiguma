@@ -172,28 +172,42 @@ pub fn interface_changed_fields(old: &Interface, new: &Interface) -> Vec<String>
 }
 
 /// Canonical route identity for diffing (sources and notes excluded).
-type RouteKey = (
-    AddressFamily,
-    Option<u32>,
-    Option<crate::model::IpNet>,
-    Option<std::net::IpAddr>,
-    Option<u32>,
-    Option<String>,
-    Option<u32>,
-    crate::model::NextHops,
-);
+/// Complete identity: every field that distinguishes two kernel routes
+/// participates (WO-03-F §5.5 — a change in any discriminator must be
+/// visible as a change event, never silently absorbed).
+#[derive(Debug, Clone, PartialEq)]
+struct RouteKey {
+    family: AddressFamily,
+    table: Option<u32>,
+    tos: Option<u8>,
+    destination: Option<crate::model::IpNet>,
+    gateway: Option<std::net::IpAddr>,
+    output_interface: Option<u32>,
+    output_interface_name: Option<String>,
+    metric: Option<u32>,
+    protocol: Option<crate::model::RouteProtocol>,
+    scope: Option<crate::model::RouteScope>,
+    route_type: Option<crate::model::RouteType>,
+    flags: Option<Vec<String>>,
+    next_hops: crate::model::NextHops,
+}
 
 fn route_key(route: &Route) -> RouteKey {
-    (
-        route.family,
-        route.table,
-        route.destination,
-        route.gateway,
-        route.output_interface,
-        route.output_interface_name.clone(),
-        route.metric,
-        route.next_hops.clone(),
-    )
+    RouteKey {
+        family: route.family,
+        table: route.table,
+        tos: route.tos,
+        destination: route.destination,
+        gateway: route.gateway,
+        output_interface: route.output_interface,
+        output_interface_name: route.output_interface_name.clone(),
+        metric: route.metric,
+        protocol: route.protocol,
+        scope: route.scope,
+        route_type: route.route_type,
+        flags: route.flags.clone(),
+        next_hops: route.next_hops.clone(),
+    }
 }
 
 /// Compute the events that turn `previous` into `current`. Pure function.

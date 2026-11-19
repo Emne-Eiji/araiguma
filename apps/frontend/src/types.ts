@@ -153,6 +153,9 @@ export interface Route {
   routeType: RouteType | null;
   metric: number | null;
   table: number | null;
+  /** Type-of-service selector (netlink rtm_tos); two routes differing
+   * only in TOS are distinct kernel routes. null = not observed. */
+  tos: number | null;
   flags: string[] | null;
   nextHops: NextHops;
   sources: ObservationSource[];

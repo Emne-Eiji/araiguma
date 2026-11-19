@@ -478,3 +478,19 @@ describe('linkNetnsid validation (WO-03-F / AUD-01)', () => {
     );
   });
 });
+
+describe('route TOS validation (WO-03-F / AUD-02)', () => {
+  it('accepts a TOS value in 0..255 and rejects out-of-range values', () => {
+    const withTos = snapshotWith((d) => {
+      (d.routes as Array<Record<string, unknown>>)[0].tos = 4;
+    });
+    expect(() => parseSnapshot(withTos)).not.toThrow();
+
+    const tooHigh = snapshotWith((d) => {
+      (d.routes as Array<Record<string, unknown>>)[0].tos = 256;
+    });
+    expect(() => parseSnapshot(tooHigh)).toThrow(
+      /routes\[0\]\.tos: expected an integer <= 255/,
+    );
+  });
+});

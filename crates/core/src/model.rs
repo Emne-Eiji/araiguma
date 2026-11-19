@@ -631,6 +631,13 @@ pub struct Route {
     /// u32 because the kernel's RTA_TABLE carries extended table ids
     /// beyond the u8 rtm_table compat field.
     pub table: Option<u32>,
+    /// Type-of-service selector of the route (netlink `rtm_tos`). Two
+    /// routes with the same destination but different TOS are DISTINCT
+    /// kernel routes; TOS therefore participates in route identity
+    /// (WO-03-F / AUD-02). `None` = not observed (procfs exposes no TOS
+    /// column).
+    #[serde(default)]
+    pub tos: Option<u8>,
     /// Kernel route flags as lowercase names; `None` = not observed.
     pub flags: Option<Vec<String>>,
     /// The route's next hops: single-path (route-level fields), the full

@@ -571,6 +571,7 @@ fn route_fixture(oif: Option<u32>, dest: &str, prefix: u8, gateway: Option<&str>
         route_type: Some(RouteType::Unicast),
         metric: Some(0),
         table: Some(254),
+        tos: None,
         flags: Some(vec![]),
         next_hops: NextHops::Single,
         sources: vec![ObservationSource::Netlink],
@@ -886,6 +887,7 @@ fn multipath_hops_count_as_routes_using_their_interfaces() {
         route_type: Some(RouteType::Unicast),
         metric: Some(50),
         table: Some(254),
+        tos: None,
         flags: Some(vec![]),
         next_hops: NextHops::Multi(vec![
             NextHop {

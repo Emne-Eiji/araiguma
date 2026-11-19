@@ -43,6 +43,7 @@ fn v4_route(dst: &str, prefix: u8, gateway: Option<IpAddr>, oif: Option<u32>) ->
         route_type: Some(RouteType::Unicast),
         metric: Some(0),
         table: Some(RT_TABLE_MAIN as u32),
+        tos: None,
         flags: None,
         next_hops: NextHops::Single,
         sources: vec![],
@@ -240,6 +241,7 @@ fn v6_procfs_route(
         route_type: None,
         metric: Some(metric),
         table: None,
+        tos: None,
         flags: Some(vec!["up".into()]),
         next_hops: NextHops::Single,
         sources: vec![ObservationSource::ProcFs],
@@ -356,11 +358,14 @@ fn ipv6_procfs_route_with_different_metric_or_hop_never_merges() {
 }
 
 #[test]
-fn ipv6_procfs_only_observation_keeps_unknown_table_and_survives_dedup() {
+fn ipv6_procfs_only_observation_keeps_unknown_table_and_row_multiplicity() {
     // The fallback scenario: netlink unavailable, only /proc/net/ipv6_route.
     // The kernel prints its unreachable-default sentinel twice (one per
-    // table) — identical lines dedup among themselves; the table stays
-    // not observed, never invented.
+    // table) — the file exposes NO table column, so the two identical rows
+    // may be distinct routes in different tables and their multiplicity is
+    // PRESERVED (WO-03-F / AUD-03: silently deduplicating them would lose
+    // an observed route). Each copy carries an explicit note saying so;
+    // the table stays not observed, never invented.
     let mut sysfs = observation(ProviderId::SysFs, 1);
     sysfs.interfaces = SectionResult::Observed(vec![iface(1, "lo", InterfaceKind::Loopback)]);
     sysfs.routes_v6 = SectionResult::Observed(vec![
@@ -370,18 +375,31 @@ fn ipv6_procfs_only_observation_keeps_unknown_table_and_survives_dedup() {
     ]);
 
     let snapshot = merge(vec![sysfs], 3);
-    assert_eq!(snapshot.routes.len(), 2, "identical sentinel lines dedup");
-    let unreachable = snapshot.routes.iter().find(|r| r.is_default()).unwrap();
     assert_eq!(
-        unreachable.table, None,
-        "table not observed, not fabricated"
+        snapshot.routes.len(),
+        3,
+        "every file row survives: {:#?}",
+        snapshot.routes
     );
-    assert_eq!(unreachable.metric, Some(u32::MAX));
-    assert_eq!(
-        unreachable.sources,
-        vec![ObservationSource::ProcFs],
-        "dedup unites provenance instead of duplicating it"
-    );
+    let sentinels: Vec<_> = snapshot.routes.iter().filter(|r| r.is_default()).collect();
+    assert_eq!(sentinels.len(), 2, "both sentinel copies are kept");
+    for sentinel in &sentinels {
+        assert_eq!(sentinel.table, None, "table not observed, not fabricated");
+        assert_eq!(sentinel.metric, Some(u32::MAX));
+        assert_eq!(sentinel.sources, vec![ObservationSource::ProcFs]);
+        assert!(
+            sentinel.notes.iter().any(|n| n.contains("appears 2 times")),
+            "the preserved multiplicity is explicit: {:?}",
+            sentinel.notes
+        );
+    }
+    // The ::1/128 row is distinct and unannotated (no multiplicity there).
+    let loopback = snapshot
+        .routes
+        .iter()
+        .find(|r| r.destination.is_some_and(|d| d.prefix_len == 128))
+        .unwrap();
+    assert!(!loopback.notes.iter().any(|n| n.contains("appears 2 times")));
 }
 
 #[test]
@@ -451,6 +469,7 @@ fn v6_route(dst: &str, prefix: u8, gateway: Option<IpAddr>, oif: Option<u32>) ->
         route_type: Some(RouteType::Unicast),
         metric: Some(0),
         table: Some(RT_TABLE_MAIN as u32),
+        tos: None,
         flags: None,
         next_hops: NextHops::Single,
         sources: vec![],
@@ -757,6 +776,7 @@ fn multipath_route(dst: &str, prefix: u8, hops: Vec<NextHop>) -> Route {
         route_type: Some(RouteType::Unicast),
         metric: Some(0),
         table: Some(254),
+        tos: None,
         flags: Some(vec![]),
         next_hops: NextHops::Multi(hops),
         sources: vec![ObservationSource::Netlink],
@@ -892,4 +912,245 @@ fn no_next_hop_is_silently_discarded_in_the_merge() {
         NextHops::Multi(hops) => assert_eq!(hops.len(), 2),
         other => panic!("both hops preserved: {other:?}"),
     }
+}
+
+/// Two multipath routes with the same destination, table, metric, and
+/// overlapping first hops — the audit's AUD-02 reproduction (`ip route
+/// append` holds both in the kernel). Overlap must NEVER collapse them.
+#[test]
+fn overlapping_multipath_routes_stay_separate() {
+    let mut netlink = observation(ProviderId::Netlink, 0);
+    netlink.interfaces = SectionResult::Observed(vec![
+        iface(2, "mp0", InterfaceKind::Ethernet),
+        iface(3, "mp1", InterfaceKind::Ethernet),
+        iface(4, "mp2", InterfaceKind::Ethernet),
+    ]);
+    let mut a = multipath_route(
+        "10.9.0.0",
+        24,
+        vec![
+            hop(Some("10.0.0.1".parse().unwrap()), Some(2), Some(2)),
+            hop(Some("10.1.0.1".parse().unwrap()), Some(3), Some(2)),
+        ],
+    );
+    a.sources = vec![ObservationSource::Netlink];
+    let mut b = multipath_route(
+        "10.9.0.0",
+        24,
+        vec![
+            hop(Some("10.0.0.1".parse().unwrap()), Some(2), Some(3)),
+            hop(Some("10.2.0.1".parse().unwrap()), Some(4), Some(3)),
+        ],
+    );
+    b.sources = vec![ObservationSource::Netlink];
+    netlink.routes_v4 = SectionResult::Observed(vec![a, b]);
+
+    let snapshot = merge(vec![netlink], 4);
+    let routes: Vec<_> = snapshot
+        .routes
+        .iter()
+        .filter(|r| {
+            r.destination
+                .is_some_and(|d| d.to_string() == "10.9.0.0/24")
+        })
+        .collect();
+    assert_eq!(
+        routes.len(),
+        2,
+        "two distinct kernel routes (overlapping hops prove nothing): {routes:#?}"
+    );
+    // No next hop was lost: the union of all hops across both routes.
+    let mut hop_set: Vec<String> = routes
+        .iter()
+        .flat_map(|r| match &r.next_hops {
+            NextHops::Multi(hops) => hops
+                .iter()
+                .map(|h| format!("{}#{}", h.gateway.unwrap(), h.output_interface.unwrap()))
+                .collect::<Vec<_>>(),
+            _ => vec![],
+        })
+        .collect();
+    hop_set.sort();
+    assert_eq!(
+        hop_set,
+        vec![
+            // 10.0.0.1#2 appears in BOTH routes — the overlap itself is
+            // preserved on each side, never collapsed into one.
+            "10.0.0.1#2".to_string(),
+            "10.0.0.1#2".to_string(),
+            "10.1.0.1#3".to_string(),
+            "10.2.0.1#4".to_string(),
+        ],
+        "every observed next hop of both routes survives the merge"
+    );
+}
+
+/// Discriminators beyond destination+metric: two otherwise-identical
+/// routes with different TOS are distinct kernel routes; two fully
+/// identical netlink observations are the same route (dedup is safe).
+#[test]
+fn routes_are_distinguished_by_tos_and_identical_ones_merge() {
+    let mut netlink = observation(ProviderId::Netlink, 0);
+    netlink.interfaces = SectionResult::Observed(vec![iface(2, "eth0", InterfaceKind::Ethernet)]);
+    let mut tos_zero = v4_route("10.0.0.0", 24, Some("10.0.0.1".parse().unwrap()), Some(2));
+    tos_zero.tos = Some(0);
+    tos_zero.sources = vec![ObservationSource::Netlink];
+    let mut tos_four = v4_route("10.0.0.0", 24, Some("10.0.0.1".parse().unwrap()), Some(2));
+    tos_four.tos = Some(4);
+    tos_four.sources = vec![ObservationSource::Netlink];
+    netlink.routes_v4 = SectionResult::Observed(vec![tos_zero.clone(), tos_four, tos_zero]);
+
+    let snapshot = merge(vec![netlink], 5);
+    let routes: Vec<_> = snapshot
+        .routes
+        .iter()
+        .filter(|r| {
+            r.destination
+                .is_some_and(|d| d.to_string() == "10.0.0.0/24")
+        })
+        .collect();
+    assert_eq!(routes.len(), 2, "TOS separates; identical copies dedup");
+    assert!(routes.iter().any(|r| r.tos == Some(0)));
+    assert!(routes.iter().any(|r| r.tos == Some(4)));
+}
+
+/// AUD-05: when a table-less procfs row matches MULTIPLE netlink routes
+/// (e.g. the same destination in two tables), the attribution is not
+/// established: the row stays independent with an explicit note, and the
+/// result does not depend on input order.
+#[test]
+fn ambiguous_procfs_row_never_picks_a_candidate_by_order() {
+    fn build(netlink_route_order: bool) -> araiguma_core::NetworkSnapshot {
+        let mut netlink = observation(ProviderId::Netlink, 0);
+        netlink.interfaces =
+            SectionResult::Observed(vec![iface(2, "eth0", InterfaceKind::Ethernet)]);
+        let mut main = v6_route("2001:db8:42::", 64, None, Some(2));
+        main.table = Some(254);
+        main.sources = vec![ObservationSource::Netlink];
+        let mut custom = v6_route("2001:db8:42::", 64, None, Some(2));
+        custom.table = Some(100);
+        custom.sources = vec![ObservationSource::Netlink];
+        let routes = if netlink_route_order {
+            vec![main, custom]
+        } else {
+            vec![custom, main]
+        };
+        netlink.routes_v6 = SectionResult::Observed(routes);
+
+        let mut sysfs = observation(ProviderId::SysFs, 1);
+        sysfs.interfaces = SectionResult::Observed(vec![iface(2, "eth0", InterfaceKind::Ethernet)]);
+        sysfs.routes_v6 =
+            SectionResult::Observed(vec![v6_procfs_route("2001:db8:42::", 64, None, "eth0", 0)]);
+        merge(vec![netlink, sysfs], 6)
+    }
+
+    let forward = build(true);
+    let reversed = build(false);
+
+    for snapshot in [&forward, &reversed] {
+        let matching: Vec<_> = snapshot
+            .routes
+            .iter()
+            .filter(|r| {
+                r.destination
+                    .is_some_and(|d| d.to_string() == "2001:db8:42::/64")
+            })
+            .collect();
+        assert_eq!(
+            matching.len(),
+            3,
+            "two netlink routes plus the unattributed row: {matching:#?}"
+        );
+        let row = matching
+            .iter()
+            .find(|r| r.sources == vec![ObservationSource::ProcFs])
+            .expect("the procfs row survives independently");
+        assert_eq!(row.table, None, "no table was invented for the row");
+        assert!(row
+            .notes
+            .iter()
+            .any(|n| n.contains("matches 2 netlink-observed routes")));
+        // Neither netlink route falsely claims the procfs observation.
+        for netlink_route in matching
+            .iter()
+            .filter(|r| r.sources.contains(&ObservationSource::Netlink))
+        {
+            assert_eq!(
+                netlink_route.sources,
+                vec![ObservationSource::Netlink],
+                "no arbitrary attribution: {:?}",
+                netlink_route.sources
+            );
+        }
+    }
+    assert_eq!(
+        forward.routes, reversed.routes,
+        "collection order never changes the result"
+    );
+}
+
+/// Two identical v4 file rows for ONE netlink multipath route: the first
+/// row reconciles (united provenance), the second is a distinct
+/// observation with an explicit note — the file's row count is preserved.
+#[test]
+fn duplicate_procfs_rows_reconcile_once_and_keep_the_remainder() {
+    let mut netlink = observation(ProviderId::Netlink, 0);
+    netlink.interfaces = SectionResult::Observed(vec![
+        iface(2, "mp0", InterfaceKind::Ethernet),
+        iface(3, "mp1", InterfaceKind::Ethernet),
+    ]);
+    let route = multipath_route(
+        "10.9.0.0",
+        24,
+        vec![
+            hop(Some("10.0.0.1".parse().unwrap()), Some(2), Some(2)),
+            hop(Some("10.1.0.1".parse().unwrap()), Some(3), Some(2)),
+        ],
+    );
+    netlink.routes_v4 = SectionResult::Observed(vec![route]);
+
+    let mut sysfs = observation(ProviderId::SysFs, 1);
+    sysfs.interfaces = SectionResult::Observed(vec![
+        iface(2, "mp0", InterfaceKind::Ethernet),
+        iface(3, "mp1", InterfaceKind::Ethernet),
+    ]);
+    let row = |name: &str| {
+        let mut r = v4_route("10.9.0.0", 24, Some("10.0.0.1".parse().unwrap()), None);
+        r.output_interface_name = Some(name.into());
+        r.sources = vec![ObservationSource::ProcFs];
+        r
+    };
+    sysfs.routes_v4 = SectionResult::Observed(vec![row("mp0"), row("mp0")]);
+
+    let snapshot = merge(vec![netlink, sysfs], 7);
+    let matching: Vec<_> = snapshot
+        .routes
+        .iter()
+        .filter(|r| {
+            r.destination
+                .is_some_and(|d| d.to_string() == "10.9.0.0/24")
+        })
+        .collect();
+    assert_eq!(
+        matching.len(),
+        2,
+        "one merged route + one remaining row: {matching:#?}"
+    );
+    let merged = matching
+        .iter()
+        .find(|r| r.sources.contains(&ObservationSource::Netlink))
+        .unwrap();
+    assert_eq!(
+        merged.sources,
+        vec![ObservationSource::Netlink, ObservationSource::ProcFs],
+        "the first row reconciles with the netlink observation"
+    );
+    let remaining = matching
+        .iter()
+        .find(|r| r.sources == vec![ObservationSource::ProcFs])
+        .unwrap();
+    assert!(remaining
+        .notes
+        .iter()
+        .any(|n| n.contains("already reconciled")));
 }

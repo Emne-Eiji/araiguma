@@ -186,6 +186,8 @@ impl SysFsProvider {
                 route_type: None,
                 metric: Some(entry.metric),
                 table: Some(RT_TABLE_MAIN as u32),
+                // /proc/net/route exposes no TOS column.
+                tos: None,
                 flags: None,
                 next_hops: NextHops::Single,
                 sources: vec![ObservationSource::ProcFs],
@@ -237,6 +239,8 @@ impl SysFsProvider {
                 // observed — never fabricated (the v4 file, by contrast,
                 // genuinely exposes main-table rows only).
                 table: None,
+                // /proc/net/ipv6_route exposes no TOS column.
+                tos: None,
                 flags: Some(parse::route_v6_flags(entry.flags_raw)),
                 next_hops: NextHops::Single,
                 sources: vec![ObservationSource::ProcFs],

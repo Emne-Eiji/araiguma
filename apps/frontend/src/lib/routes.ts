@@ -87,6 +87,7 @@ export function routeKey(route: Route, index: number): string {
     route.outputInterfaceName ?? String(route.outputInterface ?? '?'),
     route.metric ?? 'none',
     route.table ?? '?',
+    route.tos ?? 'none',
     undecodedHopsReason(route) ?? '',
     index,
   ].join('|');

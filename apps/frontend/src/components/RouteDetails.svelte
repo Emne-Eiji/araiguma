@@ -109,6 +109,10 @@
       <dd class="mono" title={route.metric === null ? 'not observed' : undefined}>
         {route.metric ?? '—'}
       </dd>
+      <dt>TOS</dt>
+      <dd class="mono" title={route.tos === null ? 'not observed (procfs exposes no TOS column)' : 'type-of-service selector — two routes differing only in TOS are distinct kernel routes'}>
+        {route.tos ?? '—'}
+      </dd>
       <dt>Table</dt>
       <dd class="mono">{route.table ?? '—'}</dd>
     </dl>

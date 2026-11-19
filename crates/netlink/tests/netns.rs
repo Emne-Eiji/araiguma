@@ -352,24 +352,38 @@ async fn netns_merge_with_sysfs_fallback() {
     );
     assert_eq!(defaults[0].gateway.unwrap().to_string(), "198.51.100.1");
 
-    // The IPv6 side (WO-03 M4): /proc/net/ipv6_route carries the kernel's
-    // unreachable-default sentinel (::/0, metric 0xffffffff, reject), which
-    // netlink does NOT dump. It stays in the snapshot as an honest
-    // procfs-only observation with an unknown table — never dropped, never
-    // fabricated into a table id.
+    // The IPv6 side (WO-03 M4; multiplicity corrected by WO-03-F / AUD-03):
+    // /proc/net/ipv6_route carries the kernel's unreachable-default
+    // sentinel (::/0, metric 0xffffffff, reject), which netlink does NOT
+    // dump. The file prints it TWICE (one per table) with NO table column,
+    // so the copies may be distinct routes in different tables: BOTH are
+    // preserved as honest procfs-only observations with an unknown table —
+    // never dropped, never fabricated into a table id, never silently
+    // deduplicated.
     let v6_defaults: Vec<_> = snapshot
         .routes
         .iter()
         .filter(|r| r.is_default() && r.family == araiguma_core::model::AddressFamily::Ipv6)
         .collect();
-    assert_eq!(v6_defaults.len(), 1, "one v6 sentinel: {v6_defaults:?}");
-    assert_eq!(v6_defaults[0].metric, Some(u32::MAX));
-    assert_eq!(v6_defaults[0].table, None);
-    assert_eq!(v6_defaults[0].sources, vec![ObservationSource::ProcFs]);
-    assert!(v6_defaults[0]
-        .flags
-        .as_ref()
-        .is_some_and(|f| f.contains(&"reject".to_string())));
+    assert_eq!(
+        v6_defaults.len(),
+        2,
+        "both sentinel rows survive (the file cannot prove they are one route): {v6_defaults:?}"
+    );
+    for sentinel in &v6_defaults {
+        assert_eq!(sentinel.metric, Some(u32::MAX));
+        assert_eq!(sentinel.table, None);
+        assert_eq!(sentinel.sources, vec![ObservationSource::ProcFs]);
+        assert!(sentinel
+            .flags
+            .as_ref()
+            .is_some_and(|f| f.contains(&"reject".to_string())));
+        assert!(
+            sentinel.notes.iter().any(|n| n.contains("appears 2 times")),
+            "the preserved multiplicity is explicit: {:?}",
+            sentinel.notes
+        );
+    }
 }
 
 #[tokio::test]
@@ -1092,4 +1106,169 @@ async fn netns_cross_namespace_peer_without_collision_stays_unresolved() {
 
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[tokio::test]
+async fn netns_appended_same_key_ecmp_routes_all_survive_the_merge() {
+    // WO-03-F / AUD-02 live reproduction: `ip route append` holds TWO
+    // distinct kernel routes with the same destination, table, and metric
+    // whose next-hop sets OVERLAP on the first hop. Before the fix the
+    // merge collapsed them and silently lost the second route's unique
+    // hop (reproduced with the real binary during the audit and again in
+    // WO-03-F remediation). Both routes, and both of /proc/net/route's
+    // rows for them, must survive.
+    if !ensure_netns("netns_appended_same_key_ecmp_routes_all_survive_the_merge") {
+        return; // parent: the child already ran and was asserted
+    }
+
+    ip(&["link", "set", "lo", "up"]);
+    for (name, addr) in [
+        ("ar-ec0", "10.0.0.5/24"),
+        ("ar-ec1", "10.1.0.5/24"),
+        ("ar-ec2", "10.2.0.5/24"),
+    ] {
+        ip(&["link", "add", name, "type", "dummy"]);
+        ip(&["link", "set", name, "up"]);
+        ip(&["address", "add", addr, "dev", name]);
+    }
+    ip(&[
+        "route",
+        "add",
+        "10.9.0.0/24",
+        "nexthop",
+        "via",
+        "10.0.0.1",
+        "dev",
+        "ar-ec0",
+        "weight",
+        "2",
+        "nexthop",
+        "via",
+        "10.1.0.1",
+        "dev",
+        "ar-ec1",
+        "weight",
+        "2",
+    ]);
+    ip(&[
+        "route",
+        "append",
+        "10.9.0.0/24",
+        "nexthop",
+        "via",
+        "10.0.0.1",
+        "dev",
+        "ar-ec0",
+        "weight",
+        "3",
+        "nexthop",
+        "via",
+        "10.2.0.1",
+        "dev",
+        "ar-ec2",
+        "weight",
+        "3",
+    ]);
+
+    // The kernel genuinely holds two routes (independent cross-check).
+    let output = Command::new("ip")
+        .args(["-j", "route", "show", "10.9.0.0/24"])
+        .output()
+        .expect("ip -j route");
+    let kernel_routes: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
+    assert_eq!(
+        kernel_routes.as_array().map(Vec::len),
+        Some(2),
+        "the kernel holds two appended routes: {kernel_routes}"
+    );
+
+    let mut netlink = NetlinkProvider::new();
+    let netlink_observation = netlink.observe().await;
+    let mut sysfs = araiguma_sysfs::SysFsProvider::new();
+    let sysfs_observation = sysfs.observe().await;
+    let snapshot = araiguma_core::merge::merge(vec![netlink_observation, sysfs_observation], 23);
+
+    let routes: Vec<_> = snapshot
+        .routes
+        .iter()
+        .filter(|r| {
+            r.destination
+                .is_some_and(|d| d.to_string() == "10.9.0.0/24")
+        })
+        .collect();
+
+    // The two netlink routes survive with their complete hop sets —
+    // including the OVERLAPPING hop (via 10.0.0.1 on ar-ec0), which both
+    // routes legitimately carry.
+    let netlink_routes: Vec<_> = routes
+        .iter()
+        .filter(|r| r.sources.first() == Some(&ObservationSource::Netlink))
+        .collect();
+    assert_eq!(
+        netlink_routes.len(),
+        2,
+        "the appended pair never collapses: {netlink_routes:#?}"
+    );
+    let name_of = |ifindex: u32| -> String {
+        snapshot
+            .interfaces
+            .iter()
+            .find(|i| i.ifindex == ifindex)
+            .map(|i| i.name.clone())
+            .unwrap_or_else(|| panic!("interface {ifindex} observed"))
+    };
+    let mut all_hops: Vec<String> = netlink_routes
+        .iter()
+        .flat_map(|r| match &r.next_hops {
+            araiguma_core::model::NextHops::Multi(hops) => hops
+                .iter()
+                .map(|h| {
+                    format!(
+                        "{} on {}",
+                        h.gateway.unwrap(),
+                        name_of(h.output_interface.unwrap())
+                    )
+                })
+                .collect::<Vec<_>>(),
+            _ => vec![],
+        })
+        .collect();
+    all_hops.sort();
+    assert_eq!(
+        all_hops,
+        vec![
+            "10.0.0.1 on ar-ec0".to_string(),
+            "10.0.0.1 on ar-ec0".to_string(), // the overlap, kept on both sides
+            "10.1.0.1 on ar-ec1".to_string(),
+            "10.2.0.1 on ar-ec2".to_string(),
+        ],
+        "every observed next hop of both routes survives: {all_hops:?}"
+    );
+
+    // /proc/net/route prints one row per kernel route — two rows, both
+    // first-hop 10.0.0.1 on ar-ec0, both ambiguous between the two routes.
+    // Neither row is attributed to either route (AUD-05); both rows
+    // survive as independent observations with the ambiguity note.
+    let procfs_rows: Vec<_> = routes
+        .iter()
+        .filter(|r| r.sources.first() == Some(&ObservationSource::ProcFs))
+        .collect();
+    assert_eq!(
+        procfs_rows.len(),
+        2,
+        "both file rows survive: {procfs_rows:#?}"
+    );
+    for row in &procfs_rows {
+        assert!(row
+            .notes
+            .iter()
+            .any(|n| n.contains("matches 2 netlink-observed routes")));
+    }
+    for netlink_route in &netlink_routes {
+        assert_eq!(
+            netlink_route.sources,
+            vec![ObservationSource::Netlink],
+            "no arbitrary attribution to either appended route"
+        );
+    }
 }

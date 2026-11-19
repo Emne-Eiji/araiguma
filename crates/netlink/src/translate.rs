@@ -535,6 +535,10 @@ pub fn translate_route(message: &RouteMessage) -> Option<Route> {
         route_type: Some(RouteType::from_raw(u8::from(message.header.kind))),
         metric: Some(priority.unwrap_or(0)),
         table,
+        // rtm_tos is part of the kernel's route key: two routes with the
+        // same destination but different TOS are distinct routes, so the
+        // value participates in merge identity (WO-03-F / AUD-02).
+        tos: Some(message.header.tos),
         flags: Some(route_flags(&message.header.flags)),
         next_hops,
         sources: vec![ObservationSource::Netlink],

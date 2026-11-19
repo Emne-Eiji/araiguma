@@ -244,6 +244,7 @@ function validateRoute(raw: unknown, path: string): void {
   optional((v, p) => asTaggedOrOther(v, ROUTE_TYPES, p), route.routeType, `${path}.routeType`);
   optional((v, p) => asInt(v, p, { min: 0 }), route.metric, `${path}.metric`);
   optional((v, p) => asInt(v, p, { min: 0 }), route.table, `${path}.table`);
+  optional((v, p) => asInt(v, p, { min: 0, max: 255 }), route.tos, `${path}.tos`);
   optional(asStringArray, route.flags, `${path}.flags`);
   validateNextHops(route.nextHops, family, `${path}.nextHops`);
   asSources(route.sources, `${path}.sources`);
