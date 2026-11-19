@@ -47,6 +47,8 @@ done
 echo "[fresh-clone] running the sysfs + core test suites without manual preparation"
 (
   cd "$CLONE"
+  # shellcheck source=scripts/env.sh disable=SC1091
+  source scripts/env.sh
   CARGO_TARGET_DIR="$TARGET" cargo test -p araiguma-sysfs -p araiguma-core -p araiguma-cli
 )
 
