@@ -811,6 +811,97 @@ fn cross_namespace_parent_link_is_annotated_never_an_edge() {
 }
 
 #[test]
+fn cross_namespace_peer_with_unassigned_netnsid_stays_unresolved() {
+    // WO-03-FC / AUD-01 closure, scenario "namespace-ID mapping
+    // unavailable": the kernel could not or did not allocate an id for
+    // the peer's namespace and emitted NETNSA_NSID_NOT_ASSIGNED (-1).
+    // The ATTRIBUTE is still present (source-verified on v5.10 and
+    // v6.8: peernet2id_alloc failures are emitted as -1, never omitted),
+    // so the peer is cross-namespace regardless — never a local edge —
+    // and the annotation reports the id as not assigned rather than the
+    // raw -1.
+    let mut snapshot = fixture("empty");
+    let mut veth = interface_fixture(4, "veth0", "other");
+    veth.kind = InterfaceKind::Veth;
+    veth.peer_ifindex = Some(2);
+    veth.link_netnsid = Some(-1);
+    let dummy = interface_fixture(2, "dummy0", "dummy");
+    snapshot.interfaces = vec![veth, dummy];
+
+    let doc = build_topology(&snapshot);
+    assert!(
+        !doc.edges.iter().any(|e| e.edge_kind == EdgeKind::VethPeer),
+        "an unassigned netnsid still marks the peer cross-namespace"
+    );
+    let node = doc.nodes.iter().find(|n| n.label == "veth0").unwrap();
+    assert!(node
+        .annotations
+        .iter()
+        .any(|a| a.contains("lives in another network namespace")));
+    assert!(node
+        .annotations
+        .iter()
+        .any(|a| a.contains("netnsid not assigned")));
+    // The observation itself is preserved verbatim, including the -1.
+    assert_eq!(node.detail.peer_ifindex, Some(2));
+    assert_eq!(node.detail.link_netnsid, Some(-1));
+}
+
+#[test]
+fn unpaired_veth_names_no_peer_and_draws_nothing() {
+    // WO-03-FC / AUD-01 closure, scenario "missing IFLA_LINK": a veth
+    // the kernel reported WITHOUT a link target (IFLA_LINK=0 — the
+    // unpaired encoding — is not recorded as a peer). No relationship is
+    // claimed and nothing is annotated: the kernel named no peer at all.
+    let mut snapshot = fixture("empty");
+    let mut veth = interface_fixture(6, "veth0", "other");
+    veth.kind = InterfaceKind::Veth;
+    veth.peer_ifindex = None;
+    snapshot.interfaces = vec![veth];
+
+    let doc = build_topology(&snapshot);
+    assert!(!doc.edges.iter().any(|e| e.edge_kind == EdgeKind::VethPeer));
+    let node = doc.nodes.iter().find(|n| n.label == "veth0").unwrap();
+    assert!(
+        node.annotations.is_empty(),
+        "no peer named — nothing to annotate: {:?}",
+        node.annotations
+    );
+    assert_eq!(node.detail.peer_ifindex, None);
+}
+
+#[test]
+fn cross_namespace_peer_sharing_the_own_ifindex_is_not_a_self_reference() {
+    // WO-03-FC / AUD-01 closure: ifindex is namespace-scoped, so a
+    // cross-namespace peer can carry the SAME ifindex as this
+    // interface. The kernel's netnsid statement is the authoritative
+    // observation — the peer is elsewhere, this is NOT a self-reference,
+    // and the annotation must not claim one.
+    let mut snapshot = fixture("empty");
+    let mut veth = interface_fixture(5, "veth0", "other");
+    veth.kind = InterfaceKind::Veth;
+    veth.peer_ifindex = Some(5); // equal to its own ifindex — legal across namespaces
+    veth.link_netnsid = Some(0);
+    snapshot.interfaces = vec![veth];
+
+    let doc = build_topology(&snapshot);
+    assert!(!doc.edges.iter().any(|e| e.edge_kind == EdgeKind::VethPeer));
+    let node = doc.nodes.iter().find(|n| n.label == "veth0").unwrap();
+    assert!(
+        !node
+            .annotations
+            .iter()
+            .any(|a| a.contains("names itself as veth peer")),
+        "a cross-namespace peer sharing the ifindex is not a self-reference: {:?}",
+        node.annotations
+    );
+    assert!(node
+        .annotations
+        .iter()
+        .any(|a| a.contains("lives in another network namespace")));
+}
+
+#[test]
 fn veth_peer_and_netnsid_serialize_into_snapshot_and_node_details() {
     // Serialization contract (WO-03-F): linkNetnsid is carried by the
     // snapshot and the topology node details, round-trips through JSON,

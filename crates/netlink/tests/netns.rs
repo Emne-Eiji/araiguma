@@ -421,6 +421,20 @@ async fn netns_veth_pair_observed_with_peer_relationship() {
     // A veth's link is its peer — never a parent/underlay relationship.
     assert_eq!(veth0.parent_ifindex, None);
     assert_eq!(veth1.parent_ifindex, None);
+    // WO-03-FC / AUD-01 closure: the same-namespace contract, pinned live.
+    // A same-namespace veth peer NEVER carries IFLA_LINK_NETNSID (the
+    // kernel emits it exactly when the link target lives in another
+    // namespace — source-verified on v5.10 and v6.8, live-checked here on
+    // the running kernel). This is the observation that makes the
+    // no-netnsid + mutual-statements pairing rule sound.
+    assert_eq!(
+        veth0.link_netnsid, None,
+        "a same-namespace peer must not carry a netnsid"
+    );
+    assert_eq!(
+        veth1.link_netnsid, None,
+        "a same-namespace peer must not carry a netnsid"
+    );
 
     // The topology projection: exactly one deduplicated VethPeer edge.
     let mut sysfs = araiguma_sysfs::SysFsProvider::new();
@@ -446,7 +460,9 @@ async fn netns_veth_pair_observed_with_peer_relationship() {
             || (idx(from), idx(to)) == (veth1.ifindex, veth0.ifindex)
     );
 
-    // Cross-validation: iproute2 agrees these are peers.
+    // Cross-validation: iproute2 agrees these are peers, and — matching the
+    // netlink observation above — reports NO link-netnsid for a
+    // same-namespace pair (it would print "link-netnsid N" otherwise).
     let output = Command::new("ip")
         .args(["-d", "link", "show", "ar-veth0"])
         .output()
@@ -455,6 +471,10 @@ async fn netns_veth_pair_observed_with_peer_relationship() {
     assert!(
         text.contains("veth"),
         "iproute2 reports the veth kind: {text}"
+    );
+    assert!(
+        !text.contains("link-netnsid"),
+        "iproute2 confirms no netnsid for a same-namespace peer: {text}"
     );
 }
 
@@ -1053,6 +1073,19 @@ async fn netns_cross_namespace_veth_peer_never_draws_a_local_edge() {
         .annotations
         .iter()
         .any(|a| a.contains("lives in another network namespace")));
+
+    // Cross-validation: iproute2 independently reports the cross-namespace
+    // marker (link-netnsid) for the moved peer — the kernel-side contract
+    // this observation relies on (WO-03-FC / AUD-01 closure).
+    let output = Command::new("ip")
+        .args(["-d", "link", "show", "ar-y0"])
+        .output()
+        .expect("ip -d link");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        text.contains("link-netnsid"),
+        "iproute2 reports the cross-namespace netnsid: {text}"
+    );
 
     // Cleanup: kill the child; its namespace (and ar-y1 inside it) dies
     // with it. The transient test namespace disappears on process exit.

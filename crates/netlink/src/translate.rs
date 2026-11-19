@@ -124,7 +124,22 @@ fn kind_detail_string(kind: &InfoKind) -> String {
 ///   `LinkInfo::Data(InfoData::Veth(InfoVeth::Peer(..)))`. Both are
 ///   recorded in `peer_ifindex`; for veth devices the link is NOT kept in
 ///   `parent_ifindex` (it is not a parent). For every other kind,
-///   `IFLA_LINK` keeps its usual parent/underlay meaning.
+///   `IFLA_LINK` keeps its usual parent/underlay meaning. A link value of
+///   0 is the kernel's "no link target" encoding (veth returns 0 when
+///   unpaired, `drivers/net/veth.c:veth_get_iflink`), not an interface
+///   index — it is recorded as "no target named", never as ifindex 0.
+/// * `IFLA_LINK_NETNSID` namespace contract (WO-03-FC / AUD-01 closure,
+///   source-verified identically on v5.10 and v6.8 — the Ubuntu 24.04 GA
+///   kernel baseline): the kernel emits the attribute from
+///   `net/core/rtnetlink.c:rtnl_fill_link_netnsid()` **iff** the device's
+///   `rtnl_link_ops->get_link_net` (for veth, `veth_get_link_net`) returns
+///   a namespace different from the device's own, using
+///   `peernet2id_alloc()`; an id that cannot be allocated is still emitted
+///   as the value `NETNSA_NSID_NOT_ASSIGNED` (-1). Consequences, per dump
+///   or notification: a cross-namespace link target ALWAYS carries the
+///   attribute (possibly -1); a same-namespace target NEVER does. Absence
+///   of the attribute therefore places the link target in the device's own
+///   namespace on both supported kernel generations.
 /// * Classification: a recognized `IFLA_INFO_KIND` string wins. An
 ///   **unrecognized** kind string proves the device is a specific kind
 ///   this model does not map: the raw string is preserved in `kind_detail`,
@@ -160,13 +175,23 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
             LinkAttribute::Mtu(value) => mtu = Some(*value),
             LinkAttribute::TxQueueLen(value) => tx_queue_len = Some(*value),
             LinkAttribute::Controller(value) => master_ifindex = Some(*value),
-            LinkAttribute::Link(value) => parent_ifindex = Some(*value),
+            // IFLA_LINK: the link target — the veth peer, or the
+            // vlan/tunnel parent. A value of 0 is the kernel's "no link
+            // target" encoding (veth returns 0 while unpaired), never an
+            // interface index (ifindex 0 does not exist), so it maps to
+            // "no target named" rather than Some(0).
+            LinkAttribute::Link(value) if *value != 0 => parent_ifindex = Some(*value),
+            LinkAttribute::Link(_) => {} // 0 = no link target
             // IFLA_LINK_NETNSID: the network namespace containing the link
-            // target (the veth peer, or the vlan/tunnel parent). Live-verified
-            // on kernel 5.10: present (with an allocated id) exactly when the
-            // target lives in another namespace; absent for same-namespace
-            // targets. The raw signed value is preserved verbatim — including
-            // a hypothetically unassigned -1 — never clamped or guessed.
+            // target (the veth peer, or the vlan/tunnel parent). Source-
+            // verified on v5.10 and v6.8 (identical logic in
+            // rtnl_fill_link_netnsid + veth_get_link_net + peernet2id_alloc,
+            // WO-03-FC / AUD-01 closure): the attribute is present exactly
+            // when the target lives in another namespace — an id that could
+            // not be allocated is emitted as NETNSA_NSID_NOT_ASSIGNED (-1),
+            // never omitted — and absent for same-namespace targets. The
+            // raw signed value is preserved verbatim (including -1), never
+            // clamped or guessed.
             LinkAttribute::LinkNetNsId(value) => link_netnsid = Some(*value),
             LinkAttribute::OperState(state) => oper_state = Some(map_oper_state(*state)),
             LinkAttribute::LinkInfo(infos) => {
@@ -180,12 +205,15 @@ pub fn translate_link(message: &LinkMessage) -> Option<Interface> {
                             kind_detail = Some(kind_detail_string(info_kind));
                         }
                         // Creation-path veth peer: a full link message whose
-                        // header index is the peer's ifindex.
+                        // header index is the peer's ifindex. Index 0 is not
+                        // a valid ifindex and names no peer.
                         netlink_packet_route::link::LinkInfo::Data(
                             netlink_packet_route::link::InfoData::Veth(
                                 netlink_packet_route::link::InfoVeth::Peer(peer),
                             ),
-                        ) => peer_from_info_data = Some(peer.header.index),
+                        ) if peer.header.index != 0 => {
+                            peer_from_info_data = Some(peer.header.index)
+                        }
                         _ => {}
                     }
                 }
@@ -857,6 +885,67 @@ mod tests {
         let interface = translate_link(&plain).expect("valid link");
         assert_eq!(interface.peer_ifindex, Some(10));
         assert_eq!(interface.link_netnsid, None);
+    }
+
+    #[test]
+    fn ifla_link_zero_is_no_link_target() {
+        // WO-03-FC / AUD-01 closure: the kernel encodes "no link target" as
+        // IFLA_LINK = 0 (veth_get_iflink returns 0 while a veth is unpaired;
+        // drivers without a link return their own ifindex and the attribute
+        // is omitted entirely). An ifindex of 0 does not exist, so 0 must
+        // not be recorded as a peer or parent — it names nothing.
+        let mut unpaired = link_message();
+        unpaired.header.index = 6;
+        unpaired.attributes = vec![
+            LinkAttribute::IfName("veth0".into()),
+            LinkAttribute::Link(0),
+            LinkAttribute::LinkInfo(vec![LinkInfo::Kind(InfoKind::Veth)]),
+        ];
+        let interface = translate_link(&unpaired).expect("valid link");
+        assert_eq!(interface.kind, InterfaceKind::Veth);
+        assert_eq!(
+            interface.peer_ifindex, None,
+            "IFLA_LINK=0 names no peer (unpaired veth)"
+        );
+        assert_eq!(interface.parent_ifindex, None);
+
+        // Same encoding on a non-veth kind (e.g. a driver reporting no
+        // parent): names nothing.
+        let mut no_parent = link_message();
+        no_parent.header.index = 3;
+        no_parent.attributes = vec![
+            LinkAttribute::IfName("eth0.100".into()),
+            LinkAttribute::Link(0),
+            LinkAttribute::LinkInfo(vec![LinkInfo::Kind(InfoKind::Vlan)]),
+        ];
+        let interface = translate_link(&no_parent).expect("valid link");
+        assert_eq!(interface.parent_ifindex, None);
+        assert_eq!(interface.peer_ifindex, None);
+    }
+
+    #[test]
+    fn creation_path_veth_peer_with_index_zero_names_no_peer() {
+        // IFLA_VETH_PEER_IFINDEX on the creation path carries a full link
+        // message; a header index of 0 is not a valid ifindex and names no
+        // peer. The dump-path IFLA_LINK (also present here) still applies.
+        let mut peer_message = link_message();
+        peer_message.header.index = 0;
+        let mut message = link_message();
+        message.header.index = 6;
+        message.attributes = vec![
+            LinkAttribute::IfName("veth0".into()),
+            LinkAttribute::LinkInfo(vec![
+                LinkInfo::Kind(InfoKind::Veth),
+                LinkInfo::Data(InfoData::Veth(InfoVeth::Peer(peer_message))),
+            ]),
+        ];
+        let interface = translate_link(&message).expect("valid link");
+        assert_eq!(interface.kind, InterfaceKind::Veth);
+        assert_eq!(
+            interface.peer_ifindex, None,
+            "a zero-index creation-path peer names no peer"
+        );
+        assert_eq!(interface.parent_ifindex, None);
     }
 
     #[test]

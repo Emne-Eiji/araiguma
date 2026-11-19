@@ -95,7 +95,7 @@
           {#if node.detail.peerIfindex === null}
             —
           {:else if peerNetnsid !== null}
-            #{node.detail.peerIfindex} in another netns (netnsid {peerNetnsid})
+            #{node.detail.peerIfindex} in another netns (netnsid {peerNetnsid === -1 ? 'not assigned' : peerNetnsid})
           {:else}
             #{node.detail.peerIfindex}
           {/if}

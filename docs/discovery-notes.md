@@ -168,19 +168,39 @@ AUD-03).
     `proto boot` from its display (boot is the default display protocol),
     so a protocol cross-check stays at the model level.
 15. **`IFLA_LINK_NETNSID` separates cross-namespace from same-namespace
-    link targets** (WO-03-F / AUD-01, verified live on kernel 5.10): a
-    veth peer (or vlan/tunnel parent) living in ANOTHER network namespace
-    ALWAYS carries an allocated netnsid in the link dump (`link-netnsid
-    N` in `ip -d link`), while a same-namespace target never carries the
-    attribute. The kernel also re-allocates a device's ifindex when it is
-    moved into a namespace where its old ifindex is taken — so a
-    cross-namespace peer's ifindex can EQUAL an unrelated local
-    interface's ifindex (reproduced live: a false vethPeer edge was drawn
-    to an unrelated dummy). Consequences: ifindex is namespace-scoped and
-    never resolves a peer on its own; a netnsid states the target is
-    elsewhere (annotation only); without a netnsid, a same-namespace pair
-    is drawn only on the kernel's MUTUAL statements (both endpoints name
-    each other).
+    link targets** (WO-03-F / AUD-01, verified live on kernel 5.10;
+    source-verified on the Ubuntu 24.04 target kernel generation by
+    WO-03-FC): a veth peer (or vlan/tunnel parent) living in ANOTHER
+    network namespace ALWAYS carries the attribute in the link dump
+    (`link-netnsid N` in `ip -d link`), while a same-namespace target
+    never carries it. WO-03-FC examined the kernel sources of v5.10
+    (this sandbox, 5.10.134) and v6.8 (the Ubuntu 24.04 LTS GA baseline)
+    side by side: the relevant logic is byte-equivalent —
+    `net/core/rtnetlink.c:rtnl_fill_link_netnsid()` emits the attribute
+    exactly when `rtnl_link_ops->get_link_net` (for veth,
+    `drivers/net/veth.c:veth_get_link_net`) returns a namespace different
+    from the device's own, using `peernet2id_alloc()`; an id that cannot
+    be allocated is emitted as the VALUE `NETNSA_NSID_NOT_ASSIGNED` (-1),
+    never omitted — so even a failed id allocation still marks the
+    target cross-namespace. The kernel also re-allocates a device's
+    ifindex when it is moved into a namespace where its old ifindex is
+    taken — so a cross-namespace peer's ifindex can EQUAL an unrelated
+    local interface's ifindex (reproduced live: a false vethPeer edge
+    was drawn to an unrelated dummy). A veth's `IFLA_LINK` value 0 is
+    the "unpaired" encoding (`veth_get_iflink`), not an ifindex.
+    Consequences: ifindex is namespace-scoped and never resolves a peer
+    on its own; a netnsid (any value, including -1) states the target is
+    elsewhere (annotation only); without a netnsid, a same-namespace
+    pair is drawn only on the kernel's MUTUAL statements (both endpoints
+    name each other) — a rule kept as defense-in-depth for foreign
+    documents even though the kernel contract itself is now established
+    on both supported generations. Live 5.10 verification:
+    `netns_veth_pair_observed_with_peer_relationship` (same-namespace
+    pair: netnsid absent, iproute2 agrees),
+    `netns_cross_namespace_veth_peer_never_draws_a_local_edge`
+    (cross-namespace: netnsid present, iproute2 agrees). The v6.8
+    verification is source-level only — no 6.8 kernel could be executed
+    in this sandbox (no virtualization authorized or available).
 16. **`ip route append` holds several routes under one superficial key**
     (WO-03-F / AUD-02, verified live): two routes with the same
     destination, table, and metric coexist with different next-hop sets —

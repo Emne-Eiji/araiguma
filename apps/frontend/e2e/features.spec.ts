@@ -398,3 +398,84 @@ test('import workflow: a selected route never survives as stale details (WO-03-F
   });
   await expect(page.getByTestId('route-details')).toHaveCount(0);
 });
+
+// WO-03-FC / AUD-01 closure: an unassigned netnsid (NETNSA_NSID_NOT_ASSIGNED,
+// -1 — the kernel emits the ATTRIBUTE with value -1 when no id could be
+// allocated for the peer's namespace) is a cross-namespace statement. The
+// details panel must render it as "not assigned", never as a raw -1 that
+// looks like a namespace id, and never as a resolved local peer.
+test('import workflow: an unassigned netnsid renders as not assigned (WO-03-FC / AUD-01)', async ({
+  page,
+}) => {
+  await page.goto('/?araiguma-test-hooks');
+
+  // A minimal valid topology document with a veth whose peer carries an
+  // unassigned netnsid — imported through the real validators.
+  const unassignedNetnsidTopology = {
+    schemaVersion: 3,
+    sourceTimestampMs: 1732000000000,
+    nodes: [
+      {
+        id: { interface: { ifindex: 6 } },
+        label: 'veth0',
+        nodeKind: 'interface',
+        interfaceKind: 'veth',
+        kindDetail: null,
+        state: 'inactive',
+        annotations: [
+          'veth peer ifindex 7 lives in another network namespace (the kernel allocated no id for the peer namespace (netnsid not assigned)); the peer is not part of this observation — no relationship drawn',
+        ],
+        detail: {
+          ifindex: 6,
+          addresses: [],
+          macAddress: 'absent',
+          mtu: 1500,
+          operState: 'down',
+          adminState: 'down',
+          masterIfindex: null,
+          parentIfindex: null,
+          peerIfindex: 7,
+          linkNetnsid: -1,
+          routesUsing: 0,
+          defaultRoutes: 0,
+          sources: ['netlink'],
+          notes: [],
+        },
+      },
+    ],
+    edges: [],
+  };
+
+  await page.getByTestId('import-file-input').setInputFiles({
+    name: 'unassigned-netnsid-topology.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(unassignedNetnsidTopology)),
+  });
+
+  // A topology-only import drives the topology view directly (the overview
+  // has no snapshot and says so explicitly — never substituted mock data).
+  await page.getByTestId('nav-topology').click();
+  await expect(page.getByTestId('topology-canvas')).toBeVisible();
+  await expect(page.getByTestId('missing-topology-notice')).toHaveCount(0);
+  await expect(page.getByTestId('imported-badge')).toBeVisible();
+
+  // Select the veth node through the read-only test hook and open the
+  // details panel.
+  await page.evaluate(() => {
+    const hook = (
+      window as unknown as {
+        __araigumaTopology?: { selectNode: (label: string) => void };
+      }
+    ).__araigumaTopology;
+    hook?.selectNode('veth0');
+  });
+  const panel = page.getByTestId('topology-details');
+  await expect(panel).toBeVisible();
+
+  // The peer line renders the cross-namespace fact with the unassigned id
+  // spelled out — not a bare -1 that could be mistaken for a namespace id
+  // (both the identity line and the annotation carry the wording).
+  await expect(panel.getByText(/in another netns/)).toBeVisible();
+  await expect(panel.getByText(/netnsid not assigned/).first()).toBeVisible();
+  await expect(panel.getByText(/netnsid -1/)).toHaveCount(0);
+});
