@@ -1,10 +1,46 @@
 // Route presentation logic: the main-table default view with an explicit,
 // visible filter for other tables. Pure and unit-tested.
 
-import type { NetworkSnapshot, Route } from '../types';
+import type { AddressFamily, NetworkSnapshot, Route } from '../types';
 import { formatRouteVia } from './format';
 
 export const MAIN_TABLE = 254;
+
+// Navigation identity for a route (WO-04 Stage A destination foundation):
+// the facts a caller naturally knows ("the default route via 198.51.100.1").
+// Resolution picks the first route whose family, destination, gateway,
+// metric, and TOS match — protocol/scope/hops are deliberately not part of
+// the navigation identity (full document-identity comparison remains
+// sameRouteIdentity below).
+export interface RouteLookup {
+  family: AddressFamily;
+  destination: { address: string; prefixLen: number } | null;
+  gateway: string | null;
+  metric: number | null;
+  tos: number | null;
+}
+
+/** Find the route a navigation reference points at, in the given routes —
+ *  null when no route matches (the caller shows the panel's empty state;
+ *  nothing stale is rendered). Fields the serializer omits (undefined) and
+ *  explicit nulls are the same "not observed" state, so both sides are
+ *  normalized before comparing. */
+export function findRouteByRef(routes: Route[], ref: RouteLookup): Route | null {
+  return (
+    routes.find(
+      (route) =>
+        route.family === ref.family &&
+        ((route.destination === null && ref.destination === null) ||
+          (route.destination !== null &&
+            ref.destination !== null &&
+            route.destination.address === ref.destination.address &&
+            route.destination.prefixLen === ref.destination.prefixLen)) &&
+        (route.gateway ?? null) === (ref.gateway ?? null) &&
+        (route.metric ?? null) === (ref.metric ?? null) &&
+        (route.tos ?? null) === (ref.tos ?? null),
+    ) ?? null
+  );
+}
 
 // WO-03 M3: route next-hop representation predicates. 'single' routes put
 // their next hop in the route-level fields; 'multi' routes carry every

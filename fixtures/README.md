@@ -17,6 +17,14 @@ described in `docs/development.md`.
 |---|---|---|
 | `workstation.json` | laptop with ethernet + wi-fi + wireguard + bridge + dummy | loopback, ethernet, wireless, vpn, bridge, dummy, multi-interface, IPv4/IPv6, multiple default routes, local table |
 | `incomplete-observations.json` | netlink failed; only sysfs/procfs observed | provider failure, degradation, missing fields, classification caveats, implied route table |
+| `server-tunnel.json` | server with tunnel default (no gateway) and ethernet default | on-link default (observed absence of a gateway), tunnel interface, server-style machine |
+| `dummy-virtual.json` | bridge port, vlan parent, veth pair, dummy | structural relations the topology projection draws (bridge/vlan/veth), virtual interface kinds |
+| `empty.json` | no observations at all | a valid observation of an empty environment (zero interfaces/addresses/routes) |
+
+The five snapshot fixtures pair one-to-one with the topology goldens in
+`topology/` (same names); the frontend's scenario registry
+(`apps/frontend/src/lib/scenarios.ts`) describes them for presentation with
+explicit synthetic provenance.
 
 ## `sysfs/` and `procfs/` — synthetic kernel filesystem trees
 
