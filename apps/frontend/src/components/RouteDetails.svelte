@@ -1,21 +1,18 @@
 <script lang="ts">
-  // Contextual details for a selected route. Overlays the workspace (same
-  // discipline as the overview and topology details panels) so the main
-  // table is never permanently narrowed. This is where route flags,
-  // observation notes, the FULL multipath next-hop list (WO-03 M3), and
-  // provenance are fully visible (WO-02 correction §4) — the table stays
-  // scannable.
+  // Route details content (rendered inside the shared AppSidePanel,
+  // WO-04 Stage A). This is where route flags, observation notes, the FULL
+  // multipath next-hop list (WO-03 M3), and provenance are fully visible
+  // (WO-02 correction §4) — the table stays scannable.
 
   import type { NextHop, Route, RouteViaAddr } from '../types';
   import { formatGateway, formatIpNet, formatProtocol, formatRouteVia } from '../lib/format';
   import { isMultipath, routeHasLimitationNotes, undecodedHopsReason } from '../lib/routes';
+  import { navigate } from '../lib/navigation.svelte';
 
   let {
     route,
-    onclose,
   }: {
     route: Route;
-    onclose: () => void;
   } = $props();
 
   function scopeLabel(): string {
@@ -54,15 +51,30 @@
   function multipathHops(): NextHop[] {
     return isMultipath(route) ? (route.nextHops as { multi: NextHop[] }).multi : [];
   }
+
+  // Tray-compatible selected-object destination (WO-04 Stage A): open the
+  // topology view with THIS route kept selected, so its interface and
+  // gateway are highlighted (highlight only — nothing is modified). This
+  // exercises the same destination API a future tray uses.
+  function showInTopology(): void {
+    navigate({
+      section: 'topology',
+      selection: {
+        kind: 'route',
+        family: route.family,
+        destination:
+          route.destination === null
+            ? null
+            : { address: route.destination.address, prefixLen: route.destination.prefixLen },
+        gateway: route.gateway,
+        metric: route.metric,
+        tos: route.tos,
+      },
+    });
+  }
 </script>
 
-<aside class="panel" data-testid="route-details" aria-label="Route details">
-  <header>
-    <h2 class="mono">
-      {formatIpNet(route.destination)} · {route.family}
-    </h2>
-    <button class="close" onclick={onclose} aria-label="Close route details">✕</button>
-  </header>
+<div class="details-content">
 
   {#if routeHasLimitationNotes(route)}
     <p class="warning" data-testid="route-limitation-warning" role="note">
@@ -207,56 +219,24 @@
       {#each route.sources as source, index (source)}{#if index > 0}, {/if}{source}{/each}
     </p>
   </section>
-</aside>
+
+  <section class="topology-link">
+    <button class="link-button" data-testid="route-show-in-topology" onclick={showInTopology}>
+      Show in Topology
+      <span class="link-hint">— keep this route selected; its interface and gateway are highlighted (highlight only)</span>
+    </button>
+  </section>
+</div>
 
 <style>
-  .panel {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(360px, 90vw);
-    overflow-y: auto;
-    background: var(--bg-panel);
-    border-left: 1px solid var(--border-strong);
-    box-shadow: var(--shadow-panel);
-    padding: 16px 18px 24px;
-    z-index: 20;
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 4px;
-  }
-
-  h2 {
-    margin: 0;
-    font-size: 16px;
-    overflow-wrap: anywhere;
-  }
-
+  /* The panel chrome (positioning, header, close) lives in
+     AppSidePanel; this styles only the content. */
   h3 {
     margin: 18px 0 8px;
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.07em;
     color: var(--text-secondary);
-  }
-
-  .close {
-    color: var(--text-muted);
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-s);
-    flex: none;
-  }
-
-  .close:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
   }
 
   .warning {
@@ -383,5 +363,31 @@
   .sources {
     margin: 0;
     font-size: 13px;
+  }
+
+  .topology-link {
+    margin-top: 20px;
+  }
+
+  .link-button {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    border-radius: var(--radius-m);
+    color: var(--accent);
+    font-size: 12.5px;
+    text-align: left;
+  }
+
+  .link-button:hover {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+
+  .link-hint {
+    color: var(--text-muted);
+    font-size: 11px;
   }
 </style>

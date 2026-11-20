@@ -187,11 +187,16 @@ test('provider status view reports both providers honestly', async ({ page }) =>
   ).toBeVisible();
 });
 
-test('overview still works after navigation', async ({ page }) => {
+test('overview and interfaces still work after navigation', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('nav-routes').click();
   await page.getByTestId('nav-topology').click();
   await page.getByTestId('nav-overview').click();
+  // The Overview summarizes the current documents (mock scenario counts).
+  await expect(page.getByTestId('overview-view')).toBeVisible();
+  await expect(page.getByTestId('mock-badge')).toBeVisible();
+  // The Interfaces section still renders every card from the fixture.
+  await page.getByTestId('nav-interfaces').click();
   await expect(page.getByTestId('iface-card-wlp3s0')).toBeVisible();
   await expect(page.getByTestId('mock-badge')).toBeVisible();
 });
@@ -248,6 +253,7 @@ test('import workflow: snapshot and topology documents, provenance, and return t
   await expect(page.getByTestId('data-provenance')).toContainText('real-snapshot.json');
   await expect(page.getByTestId('data-provenance')).toContainText('not a live connection');
   // The snapshot drives the views: server-tunnel has ens3+tun0, no wlp3s0.
+  await page.getByTestId('nav-interfaces').click();
   await expect(page.getByTestId('iface-card-tun0')).toBeVisible();
   await expect(page.getByTestId('iface-card-wlp3s0')).toHaveCount(0);
 
@@ -282,7 +288,7 @@ test('import workflow: snapshot and topology documents, provenance, and return t
   // Returning to the demonstration data is explicit and works.
   await page.getByTestId('nav-return-mock').click();
   await expect(page.getByTestId('mock-badge')).toBeVisible();
-  await page.getByTestId('nav-overview').click();
+  await page.getByTestId('nav-interfaces').click();
   await expect(page.getByTestId('iface-card-wlp3s0')).toBeVisible();
 });
 

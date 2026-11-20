@@ -1,5 +1,9 @@
 <script lang="ts">
-  import type { Address, Interface, NetworkSnapshot } from '../types';
+  // Interface details content (rendered inside the shared AppSidePanel,
+  // WO-04 Stage A). All identity, address, route, and observation-note
+  // facts come from the snapshot — never fabricated.
+
+  import type { Interface, NetworkSnapshot } from '../types';
   import {
     formatMacObservation,
     interfaceStateChip,
@@ -10,11 +14,9 @@
   let {
     iface,
     snapshot,
-    onclose,
   }: {
     iface: Interface;
     snapshot: NetworkSnapshot;
-    onclose: () => void;
   } = $props();
 
   const chip = $derived(interfaceStateChip(iface));
@@ -43,16 +45,7 @@
   );
 </script>
 
-<aside
-  class="panel"
-  data-testid="details-panel"
-  aria-label="Interface details for {iface.name}"
->
-  <header>
-    <h2 class="mono">{iface.name}</h2>
-    <button class="close" onclick={onclose} aria-label="Close details">✕</button>
-  </header>
-
+<div class="details-content">
   <section>
     <h3>Identity</h3>
     <dl>
@@ -141,54 +134,17 @@
       </ul>
     </section>
   {/if}
-</aside>
+</div>
 
 <style>
-  .panel {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(360px, 90vw);
-    overflow-y: auto;
-    background: var(--bg-panel);
-    border-left: 1px solid var(--border-strong);
-    box-shadow: var(--shadow-panel);
-    padding: 16px 18px 24px;
-    z-index: 20;
-    /* The panel overlays the workspace; it never shrinks it. */
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 4px;
-  }
-
-  h2 {
-    margin: 0;
-    font-size: 17px;
-  }
-
+  /* The panel chrome (positioning, header, close) lives in
+     AppSidePanel; this styles only the content. */
   h3 {
     margin: 18px 0 8px;
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.07em;
     color: var(--text-secondary);
-  }
-
-  .close {
-    color: var(--text-muted);
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-s);
-  }
-
-  .close:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
   }
 
   dl {

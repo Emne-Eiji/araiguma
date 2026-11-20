@@ -2,7 +2,9 @@ import { expect, test } from '@playwright/test';
 
 // Browser smoke test against the production build (preview server).
 // Establishes: the app starts, renders the shell and mock data, and does
-// not throw runtime errors.
+// not throw runtime errors. Since WO-04 Stage A the shell has six sections;
+// the interface cards live in the Interfaces section and the landing view
+// is the Overview summary.
 
 test('application renders the shell with mock interface cards', async ({ page }) => {
   const errors: string[] = [];
@@ -11,10 +13,12 @@ test('application renders the shell with mock interface cards', async ({ page })
   await page.goto('/');
   await expect(page).toHaveTitle(/Araiguma/);
 
-  // Navigation rail with the overview item.
+  // Navigation rail with the overview item, landing on the Overview.
   await expect(page.getByTestId('nav-overview')).toBeVisible();
+  await expect(page.getByTestId('overview-view')).toBeVisible();
 
-  // Mock interface cards render from the fixture.
+  // The Interfaces section shows the mock interface cards from the fixture.
+  await page.getByTestId('nav-interfaces').click();
   const card = page.getByTestId('iface-card-wlp3s0');
   await expect(card).toBeVisible();
   await expect(card.getByText('Wi-Fi')).toBeVisible();

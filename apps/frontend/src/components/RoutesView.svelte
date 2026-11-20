@@ -245,8 +245,9 @@
     {#if selectedRoute}
       <p class="selection-note" data-testid="route-selection-note">
         Route selected — full flags, notes, and provenance are in the details
-        panel; switch to <strong>Topology</strong> to see its interface and
-        gateway highlighted (highlight only; nothing is modified).
+        panel; use <strong>Show in Topology</strong> there to see its
+        interface and gateway highlighted (highlight only; nothing is
+        modified).
       </p>
     {/if}
   {/if}
@@ -323,6 +324,9 @@
     color: var(--text-muted);
     font-size: 11px;
     margin-left: 4px;
+    /* Hint text wraps at a readable measure instead of running as one
+       long line (which would also extend under the details overlay). */
+    max-width: 62ch;
   }
 
   .table-wrap {
@@ -436,6 +440,7 @@
     margin: 10px 0 0;
     color: var(--text-secondary);
     font-size: 12px;
+    max-width: 62ch;
   }
 
   .empty-state {

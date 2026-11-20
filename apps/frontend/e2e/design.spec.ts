@@ -64,6 +64,7 @@ test('design foundation: dark theme, 56px rail, workspace dominance', async ({ p
 
 test('details panel overlays the workspace instead of shrinking it', async ({ page }) => {
   await page.goto('/');
+  await page.getByTestId('nav-interfaces').click();
   const widthBefore = await page
     .locator('.workspace')
     .evaluate((el) => el.getBoundingClientRect().width);

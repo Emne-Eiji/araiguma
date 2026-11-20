@@ -1,6 +1,7 @@
 <script lang="ts">
-  // Contextual details for a selected topology node. Overlays the workspace
-  // (same discipline as the overview details panel).
+  // Topology-node details content (rendered inside the shared
+  // AppSidePanel, WO-04 Stage A). Everything shown comes from the projected
+  // document — relations only where evidence exists.
 
   import type { TopologyDocument, TopologyNode } from '../types';
   import {
@@ -14,11 +15,9 @@
   let {
     node,
     document,
-    onclose,
   }: {
     node: TopologyNode;
     document: TopologyDocument;
-    onclose: () => void;
   } = $props();
 
   const connectedEdges = $derived(
@@ -33,12 +32,7 @@
   const peerNetnsid = $derived(node.detail.linkNetnsid ?? null);
 </script>
 
-<aside class="panel" data-testid="topology-details" aria-label="Topology node details">
-  <header>
-    <h2 class="mono">{node.label}</h2>
-    <button class="close" onclick={onclose} aria-label="Close details">✕</button>
-  </header>
-
+<div class="details-content">
   <section>
     <h3>Kind</h3>
     <p class="value">
@@ -169,54 +163,17 @@
       </ul>
     </section>
   {/if}
-</aside>
+</div>
 
 <style>
-  .panel {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(360px, 90vw);
-    overflow-y: auto;
-    background: var(--bg-panel);
-    border-left: 1px solid var(--border-strong);
-    box-shadow: var(--shadow-panel);
-    padding: 16px 18px 24px;
-    z-index: 20;
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 4px;
-  }
-
-  h2 {
-    margin: 0;
-    font-size: 17px;
-    overflow-wrap: anywhere;
-  }
-
+  /* The panel chrome (positioning, header, close) lives in
+     AppSidePanel; this styles only the content. */
   h3 {
     margin: 18px 0 8px;
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.07em;
     color: var(--text-secondary);
-  }
-
-  .close {
-    color: var(--text-muted);
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-s);
-  }
-
-  .close:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
   }
 
   .value {
