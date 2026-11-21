@@ -61,8 +61,9 @@ shutdown_grace_secs = 5
 default_secs = 60
 per_section = { }         # e.g. { dns = 300 }
 
-[privacy]
-redact_macs_in_export = true
+[privacy]                 # diagnostics-export policy (§9.1)
+mac_addresses = "redact"  # redact (default) | vendor-prefix | include
+ip_addresses  = "include" # include (default) | redact
 ```
 
 - Absent file ⇒ all defaults; **no warning** (a default-config run is
@@ -115,6 +116,14 @@ Free-form `detail` strings are for humans; machine consumers key on
 `event` + `error_kind` (the classification contract of document 02 §7).
 No field outside this vocabulary is written without extending this
 specification (review gate; document 06 §5).
+
+**Detail-string content rule (binding; the foundation of §9's privacy
+posture):** `detail` (and every other free-form string — error,
+reason, and note fields) never embeds SSIDs or other wireless network
+names, VPN connection names, hostnames, or user/home-directory paths.
+Classification and correlation use interface names, provider ids,
+section kinds, and stable identifiers, which suffice; a representative
+corpus asserts the rule in the redaction tests (document 07 §5).
 
 ## 4. Timestamp and timezone conventions
 
@@ -216,25 +225,59 @@ Contents — exactly (include/exclude is the contract):
 | session registry records (§6) | full document bodies (sizes; only summaries below) |
 | the log file contents (bounded per §5) | network payloads, captured traffic (nothing is captured, ever) |
 | capability reports of all providers (document 02 §5) | contents of `~/.ssh`, browser profiles, unrelated paths (never read) |
-| the most recent document **summary**: counts per section, provider states, timestamps, document/collection ids, conflict counts | MAC addresses when `privacy.redact_macs_in_export = true` (default): first three octets retained (`52:54:00:…`), remainder redacted |
+| the most recent document **summary**: counts per section, provider states, timestamps, document/collection ids, conflict counts | MAC addresses — **fully redacted by default** (§9.1): replaced by the marker `<redacted>`, all six octets; `vendor-prefix` (first three octets) and `include` are explicit user disclosures via `privacy.mac_addresses`, never defaults |
 | IPC/watch statistics: envelope counts, resync events | |
 | `config.toml` **as written by the user** (it has no secret fields by schema) | |
 
-Redaction safeguards (binding):
+### 9.1 Field-level privacy policy (binding)
 
-- Redaction happens **at export construction**, on a field allowlist:
-  only the structured fields of §3 plus the named sections above are
-  written; anything not on the list never enters the export (structural
-  privacy, not string scrubbing).
-- Interface names are retained (diagnostic value outweighs the
-  locality leak; they are host-local facts), MACs redacted by default
-  (§2 toggle), IP addresses retained (they are the product's subject
-  matter; the user is exporting network diagnostics).
+The export schema is an **allowlist**: a field is written only if the
+table above names it and §3's vocabulary defines it — a field not on
+the list never enters the export (structural privacy). Additionally,
+the free-form string content that the allowlisted fields carry (log
+`detail`, error/reason strings) passes a **pattern-redaction pass** at
+export construction for the value categories marked redacted or
+generalized below. Neither mechanism alone is sufficient — the
+allowlist bounds which fields exist; the pattern pass bounds what the
+retained free-form strings contain — and both are tested (document 07
+§5). Redacted values are replaced by the literal marker `<redacted>`;
+generalized paths use `~/…` form.
+
+Per-category policy (each category states: included by default?
+treatment? diagnostic necessity? user control? exposure?):
+
+| Category | Reaches the export via | Default treatment | Why needed for diagnostics | User control | What it can reveal |
+|---|---|---|---|---|---|
+| MAC addresses | free-form log/error strings only (the document summary carries counts, never values) | **fully redacted** — all six octets, marker `<redacted>`; no vendor OUI retained | correlating interface-level errors | `privacy.mac_addresses`: `redact` (default) / `vendor-prefix` (first three octets — an explicit disclosure of hardware vendor) / `include` | device identity; hardware vendor (OUI) |
+| IPv4 addresses | free-form log/error strings | retained (`include` default) — network diagnostics is the product's subject matter; a user exporting diagnostics expects them | address/route observation diagnosis | `privacy.ip_addresses`: `include` / `redact` | local network topology (private ranges) |
+| IPv6 addresses | free-form log/error strings | retained (same setting) | same — includes link-local and privacy-extension addresses | same | interface identity (EUI-64-derived bits can expose the MAC); topology |
+| Interface names | log records (`detail` references interfaces) | retained | the primary correlation key in every diagnostic line | none (host-local names; a deliberate retention decision) | weak hardware hints (name encodes driver/slot); host-local only |
+| SSIDs / wireless network identifiers | nowhere, by construction (§3 detail-string rule; summaries carry counts, not values) | omitted | not needed — section outcomes and counts diagnose Wi-Fi sections | none (a future disclosure option would be a reviewed schema change) | location (network names are location-correlated); organization |
+| VPN names / provider identifiers | nowhere, by construction (same rule); generic VPN **type** classifications (`vpn`, `wireguard`, …) may appear as classification values | names omitted; type classifications retained | type evidence diagnoses the VPN section | none | organization / network affiliation |
+| Route destinations & gateways | nowhere, by construction (full document bodies excluded; summaries carry counts; §3 rule keeps values out of `detail`) | omitted | counts and section outcomes suffice | none | network topology |
+| DNS server addresses & search domains | nowhere, by construction (same); the resolver **provider state** (available / permissionDenied / …) is retained in capability reports | values omitted; provider states retained | diagnosing resolver provider failures needs the state, not the values | none | topology; organization (search domains) |
+| Hostnames | nowhere (the environment summary deliberately excludes the hostname) | omitted | OS, kernel, version, channel, architecture suffice | none | machine identity; location |
+| User / home-directory paths | startup/config records name the config and state paths in effect | **generalized**: `/home/<user>/…` → `~/…` (likewise any `$XDG_*` override) | diagnosing config/state path issues needs the path shape, not the username | none | username (identity) |
+| Hardware identifiers | MAC addresses (above) are the only hardware identifiers the application ever observes; no serials, machine ids, or hardware UUIDs are collected | MAC per above; others not collected | — | — | device identity |
+| Provider object paths (D-Bus) | capability/error strings (e.g. `/org/freedesktop/NetworkManager/Devices/3`) | retained | correlating provider failures to objects | none | generic service topology only (no user identity) |
+| Timestamps & observation metadata | every record (§4 UTC RFC 3339; document-summary timestamps and ids) | retained | the timeline is the diagnostic | none | activity times (behavioral); no location |
+
+Hard exclusions (never in an export, under any setting): credentials,
+passwords, private keys, tokens, NetworkManager secrets, unrelated
+personal files, arbitrary environment variables, unrelated process
+data, browser data, and any undisclosed external communication or
+telemetry (none of these exist in the application's data model; the
+exclusion is audited — document 06 §5 check 8, document 07 §5).
+
 - The export's first line is a manifest record listing what was
-  included, what was excluded, and the redaction settings applied — the
-  file describes itself.
-- Redaction is unit-tested against the field vocabulary (document 07
-  §5): no field outside the allowlist can appear in an export.
+  included, what was excluded, and the effective redaction settings
+  (`privacy.mac_addresses`, `privacy.ip_addresses`) — the file
+  describes itself.
+- Redaction and the allowlist are unit-tested (document 07 §5) against
+  a representative corpus: MAC (all three modes), IPv4, IPv6,
+  SSID-bearing, VPN-name-bearing, home-path, and secret-bearing inputs,
+  plus field-allowlist totality (no field outside the list can appear
+  in an export) and the §3 detail-string rule.
 
 ## 10. What this design deliberately does not do
 
@@ -257,5 +300,5 @@ Redaction safeguards (binding):
 | UTC RFC 3339 log timestamps | project UTC rule | approved-derived |
 | 5 MiB × rotations, 50 MiB default bound, oldest-first deletion | §5; bounded-storage principle | RD-22 |
 | Append-only session registry with unclean detection | document 01 §6; crash forensics | RD-23 |
-| Field-allowlist export with default MAC redaction and self-describing manifest | work order §3.8 privacy safeguards | RD-24 |
+| Field-allowlist export with per-category privacy policy (§9.1), **full** MAC redaction by default (partial disclosure only by explicit user choice), and self-describing manifest | work order §3.8 privacy safeguards; Prompt 03-FC §6 (FC-03) | RD-24 |
 | stderr fallback, never block, no silent alternate location | work order §3.8 | approved-derived |

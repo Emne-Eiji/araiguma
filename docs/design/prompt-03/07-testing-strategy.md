@@ -74,8 +74,11 @@ A shared conformance harness any provider implementation must pass
 - D-Bus providers (Track 1): run against the private session-bus
   harness with a **mock service object** exposing exactly the
   allow-listed surface (document 06 §4) — including mock services that
-  *offer* prohibited members, asserting the restricted proxy never
-  calls them (R-03 mitigation, executable in Track 1).
+  *offer* prohibited members, unlisted properties, `Properties.GetAll`,
+  and `ObjectManager.GetManagedObjects`, asserting the restricted proxy
+  never calls them and that unknown operations are unreachable
+  (R-03 mitigation; document 06 §4.1/§4.6; Prompt 03-FC FC-02 —
+  executable in Track 1).
 
 ## 5. Serialization, schema-compatibility, and validation tests
 
@@ -94,15 +97,42 @@ A shared conformance harness any provider implementation must pass
 - Validation totality: boundary validators reject every class of
   structural violation (the existing malformed-document corpus [REPO],
   grown with v4 cases).
+- Diagnostics redaction tests (document 05 §9.1): field-allowlist
+  totality (no field outside document 05 §9's list can appear in an
+  export); the pattern pass on representative inputs — MAC addresses
+  in all three `privacy.mac_addresses` modes (default asserts the
+  `<redacted>` marker with no octets retained), IPv4/IPv6 literals in
+  both `privacy.ip_addresses` modes, SSID-bearing, VPN-name-bearing,
+  home-path (generalized to `~/…`), and secret-bearing strings (asserted
+  absent under every setting); the §3 detail-string content rule corpus
+  (no SSID, VPN-name, hostname, or path content in `detail`).
+  Prompt 03-FC FC-03.
 
 ## 6. IPC request/event tests (headless — new)
 
 - The transport-neutral command handlers (document 04 §10) are tested
-  as plain functions: request/response shapes, error codes
-  (`invalidRequest` with path-qualified detail, `shutdownInProgress`),
-  subscription lifecycle (subscribe → first envelope is `snapshot` →
-  `ended` on unsubscribe/shutdown; no leaked subscriptions after
-  window close).
+  as plain functions: request/response shapes for **all four commands**
+  (document 04 §9), error codes (`invalidRequest` with path-qualified
+  detail, `shutdownInProgress`), and the complete subscription
+  lifecycle (Prompt 03-FC FC-01):
+  - subscribe → first envelope is `snapshot`, handle carries a fresh
+    unguessable `subscriptionId`;
+  - unsubscribe (active) → `Cancelled`; exactly one terminal `ended`
+    envelope whose `seq` is the highest delivered document-event seq;
+    no document-event envelope delivered after `ended`;
+  - repeated unsubscribe (already terminated) → idempotent `Cancelled`,
+    **no** second `ended`;
+  - unsubscribe with an unknown id (well-formed, never issued this
+    session) → `invalidRequest` naming the id;
+  - disconnect cleanup: frontend/window close terminates and releases
+    every subscription server-side — no leaked subscription state,
+    channel, or delivery task survives (asserted with task/spawn
+    instrumentation);
+  - shutdown cleanup: every active subscription receives `ended`; the
+    next command returns `shutdownInProgress`; no orphaned delivery
+    task remains (asserted after engine shutdown);
+  - `ended` consumes no seq: the engine's document-event counter is
+    unchanged by terminations.
 - Envelope contract: seq monotonicity, in-order delivery, envelope
   payload equality with CLI `watch` output for the same engine state
   (the two transports are one contract — OD-03, proven by construction

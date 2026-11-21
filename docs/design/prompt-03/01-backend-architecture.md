@@ -194,7 +194,7 @@ assumed installed, active, accessible, or authoritative (document 02 §3).
 
 A **session** is one process incarnation of the application (CLI one-shot,
 CLI watch, or desktop run) with a process-unique session id (UUID v4,
-document 04 §5). Sessions are the unit of log correlation and diagnostics
+document 04 §2). Sessions are the unit of log correlation and diagnostics
 export (document 05). Documents produced by a session carry its
 collection identity (session id + collection counter), never the session's
 private state.
@@ -203,7 +203,7 @@ private state.
 
 1. Load configuration from `~/.config/araiguma/config.toml` (OD-08;
    defaults when absent; malformed file ⇒ defaults + warning, never a
-   crash — document 05 §3).
+   crash — document 05 §2).
 2. Initialize logging to `~/.local/state/araiguma/logs/` (OD-08; stderr
    fallback when unwritable — document 05 §8).
 3. Allocate the session id; log startup (versions, config path, XDG
@@ -222,7 +222,7 @@ Shutdown is cooperative and ordered, with a bounded grace period
 (recommended default 5 s, configurable — RD-14):
 
 1. Stop accepting new subscriptions / commands (desktop: emit a typed
-   `shutdownInProgress` IPC error — document 04 §6).
+   `shutdownInProgress` IPC error — document 04 §9).
 2. Signal the engine; providers stop in-flight observation cooperatively.
 3. Tear down change feeds and D-Bus matches; close sockets.
 4. Flush and close the log (a shutdown record with session statistics).
@@ -239,7 +239,7 @@ network); a crashed session leaves at most a truncated last log line and
 an unterminated session record. The next session's startup detects the
 stale session record and marks it `unclean` in the session registry
 (document 05 §6). A crashed session never corrupts a document: documents
-are constructed in memory and serialized atomically (document 04 §8).
+are constructed in memory and serialized atomically (document 04 §6).
 
 ## 7. Integration surfaces
 
@@ -259,10 +259,10 @@ Import is a pure document operation: parse, validate fully, and either
 accept (document enters the imported-documents store with its ORIGINAL
 observation time and a SEPARATE import time) or reject with a
 path-qualified reason; an invalid document never disturbs the current
-valid view (atomic replacement — document 04 §8; existing frontend
+valid view (atomic replacement — document 04 §6; existing frontend
 behavior, WO-03 M1 + WO-03-F AUD-09 [REPO]). Imported documents are never
 presented as live observations (existing status-bar discipline [REPO];
-formalized in document 04 §9). Import works fully offline.
+formalized in document 04 §6). Import works fully offline.
 
 ### 7.3 Tauri desktop shell (`apps/desktop`, new — OD-01, OD-03)
 
@@ -270,7 +270,7 @@ The shell crate contains, and only contains:
 
 - Tauri app bootstrap (window, tray registration only when a future work
   order authorizes it — OD-07 stays open);
-- the IPC command handlers of document 04 §5 (each a thin mapping to one
+- the IPC command handlers of document 04 §9 (each a thin mapping to one
   engine call);
 - event emission of document 04 §7 (envelopes forwarded verbatim);
 - logging/diagnostics bootstrap (document 05);
@@ -369,13 +369,13 @@ To keep Prompt 06 integrable without re-architecture, this design reserves
    the section vocabulary is extensible (document 02 §5), so a counters
    section requires no contract change — only a Prompt 06 decision.
 2. **Document-level optional sections**: schema evolution policy
-   (document 04 §6) permits additive, defaulted sections; an
+   (document 04 §4) permits additive, defaulted sections; an
    `accounting` section (counters, allowance model, reset semantics)
    would be additive and versioned there.
 3. **Identity stability**: interface identity (ifindex + name + namespaced
    peers, document 03 §4) is already sufficient to correlate counter
    series across observations.
-4. **Timing**: the envelope's observation timing (document 04 §5) gives
+4. **Timing**: the envelope's observation timing (document 04 §2) gives
    rate derivation its time base.
 
 Nothing in the current pipeline computes, estimates, or displays traffic

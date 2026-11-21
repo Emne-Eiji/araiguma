@@ -258,7 +258,7 @@ dedup [REPO], extended by **conflict recording** (schema v4):
 ## 10. Observation time, provenance, and staleness
 
 - Every document carries observation timing (start/completion, per-
-  provider completion times — document 04 §5) and per-item provenance
+  provider completion times — document 04 §2) and per-item provenance
   (`sources`) [existing discipline extended].
 - **Staleness is derived, never stored as a fact**: a consumer computes
   `now − observationTime` against an explicit freshness policy (per

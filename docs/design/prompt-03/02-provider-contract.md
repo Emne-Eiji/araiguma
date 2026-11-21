@@ -63,7 +63,7 @@ section outcomes [extension of the existing six-state model]:
 Rules:
 
 1. **A provider that cannot run is `unavailable`, and nothing more.** Its
-   sections report `unavailable` (document 03 §8); the corresponding
+   sections report `unavailable` (document 03 §1); the corresponding
    entities are `notObserved`, never "absent".
 2. **Permission denial is explicit.** A section that failed *because
    access was denied* records `permissionDenied` with the mechanism
@@ -138,7 +138,7 @@ CapabilityReport {
 ```
 
 - `probe()` produces a `CapabilityReport`; it is embedded in schema v4
-  documents (document 04 §4) so every document states what *could* and
+  documents (document 04 §2) so every document states what *could* and
   *could not* have been observed — the foundation for honest "not
   observed" presentation (a section absent from a document may mean
   unsupported-by-this-environment, and the report says which).

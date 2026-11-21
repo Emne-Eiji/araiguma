@@ -63,3 +63,20 @@ accounting (only architectural extension points are reserved here); Prompt
 07 security/notifications/testing beyond the backend security and test
 architecture required here; WO-TRAY-01 tray implementation; any source-code
 change, dependency addition, or application configuration change.
+
+## Amendment record
+
+- **Prompt 03-FC (Emne, 2026-11-21)** — consistency-correction pass,
+  documentation only. FC-01: IPC subscription cancellation made an
+  explicit fourth command (`unsubscribe_watch`) with a complete
+  lifecycle contract (document 04 §9). FC-02: D-Bus allow-list scoped
+  per operation (service / object path / interface / member /
+  operation); `Properties.GetAll` and `ObjectManager.GetManagedObjects`
+  excluded from v1.0.0 (document 06 §4). FC-03: diagnostics export
+  defaults to **full** MAC redaction; per-category field-level privacy
+  policy (document 05 §9.1). FC-04: implementation dispositions for
+  RD-01..RD-30 classified — all remain unapproved recommendations
+  (document 08 §3.1). FC-05: recovery-manifest packaging omission
+  documented and corrected (work-order closeout). FC-06: storage
+  measured and reported. No architecture, approved decision, or valid
+  technical conclusion was reopened.

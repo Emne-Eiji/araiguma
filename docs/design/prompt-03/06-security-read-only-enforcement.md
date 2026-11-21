@@ -82,63 +82,122 @@ it."
 **L5 — optional hardening (post-1.0.0, not required).** Seccomp
 write-syscall filtering on provider threads: deferred (work order).
 
-## 4. The D-Bus allow-list (concrete and reviewable)
+## 4. The D-Bus allow-list (concrete, reviewable, deny-by-default)
 
 Design rule (Q-1 resolved): **no D-Bus member is allowed because its
-name sounds observational.** Each allowed member is listed with its
-actual semantics; anything not listed is prohibited by construction.
-The generic primitives are narrowed first, then members:
+name sounds observational.** Each allowed operation is listed with its
+actual semantics at the granularity of **service name, object path (or
+path pattern), interface, member (property or method), and access
+operation**. Anything not listed — any service, path, interface,
+property, or method absent from the tables below — is prohibited by
+construction.
 
-**Generic primitives (the only raw D-Bus operations the connection
-wrapper exposes):**
+Failure and permission behavior, common to every row: a denied operation
+records `permissionDenied { mechanism: "dbus-denied" }` for the affected
+section; a failed operation records `Failed { error }`; either way the
+section reports an **evidence limitation**, never a network-absence
+claim (§7; document 02 §3 — binding).
 
-| Primitive | Semantics | Status |
+### 4.1 Generic primitives (the only raw D-Bus operations the connection
+wrapper exposes — each scoped, none blanket)
+
+| Primitive | Scope restriction | Status |
 |---|---|---|
-| `org.freedesktop.DBus.Properties.Get` / `GetAll` | read a property's cached value; no side effects | allowed |
-| `org.freedesktop.DBus.ObjectManager.GetManagedObjects` | enumerate objects + properties in one read | allowed |
-| `org.freedesktop.DBus.AddMatch` (signals) | subscribe — receiving only | allowed, matched signals only (below) |
-| `org.freedesktop.DBus.NameHasOwner` / `ListNames` (bus driver) | capability probing (is the service running?) | allowed |
+| `org.freedesktop.DBus.Properties.Get(service, path, interface, property)` | permitted **only** for the exact (service, object-path-pattern, interface, property) rows of §4.2–4.3; a `Get` naming any other tuple is denied by the wrapper | allowed (scoped) |
+| `org.freedesktop.DBus.Properties.GetAll(service, path, interface)` | **no interface is approved for `GetAll` in v1.0.0**: every candidate interface carries properties outside the reviewed observation scope (e.g. NetworkManager Manager's `GlobalDnsConfiguration`, Device's `Udi`/`Vendor`/`Product`, resolved Manager's `Transactions`), so a blanket read cannot be bounded to the allow-list. All property access is **named `Get`** against the tables. A future amendment may approve `GetAll` for one exact interface only with a row-by-row review of every property that interface exposes | **prohibited (v1.0.0; amendment path stated)** |
+| `org.freedesktop.DBus.ObjectManager.GetManagedObjects` | returns every property of every interface of every managed object — unboundable to the allow-list; enumeration uses the service-specific methods and object-path properties in §4.2 instead | **prohibited (v1.0.0; amendment path as above)** |
+| `org.freedesktop.DBus.AddMatch(rule)` | signal subscription only, and only the exact signals enumerated in §4.2–4.3 | allowed (scoped) |
+| `org.freedesktop.DBus.NameHasOwner` / `ListNames` (bus driver) | capability probing only (is the service running?) — bus-driver queries, no service state | allowed |
 | `org.freedesktop.DBus.Properties.Set` | mutation | **prohibited** |
-| any method member not in the tables below | — | **prohibited** |
+| `org.freedesktop.DBus.Introspect`; any method member not in the tables below | introspection unnecessary (statically generated clients); unlisted members out of scope by definition | **prohibited** |
 
 Runtime introspection is unnecessary (statically generated clients) and
 `Introspect` is not used.
 
-**NetworkManager (`org.freedesktop.NetworkManager`) — allowed members:**
+### 4.2 NetworkManager (`org.freedesktop.NetworkManager`) — allowed operations
 
-| Member | Kind | Semantics (why it is safe) |
-|---|---|---|
-| `Devices`, `AllDevices`, `ActiveConnections`, `PrimaryConnection`, `PrimaryConnectionType`, `State`, `Version`, `Connectivity`, `NetworkingEnabled`, `WirelessEnabled`, `WwanEnabled`, `Metered`, `Startup` (Manager properties) | property get | cached state reads; `Connectivity` is NM's **cached** value (NM's own checks produced it — we do not trigger one) |
-| `GetDevices`, `GetAllDevices` (Manager methods) | method | return object paths of existing devices — pure enumeration, no state change |
-| Device properties: `DeviceType`, `Interface`, `IpInterface`, `State`, `Driver`, `HwAddress`, `Real`, `Metered`, `ActiveConnection`, `Ip4Config`, `Ip6Config`, `Dhcp4Config`, `Dhcp6Config`, `Wireless`, `WirelessCapabilities` | property get | per-device observed facts; `HwAddress` is privacy-noted (document 05) |
-| Wireless AP properties (`Ssid`, `Strength`, `Flags`, `WpaFlags`, `RsnFlags`, `Frequency`, `Mode`) via `AccessPoints`/`LastScan` device properties | property get | the **current** scan list only; no scan is requested |
-| ActiveConnection properties: `Connection`, `Devices`, `State`, `Type`, `Vpn`, `Ip4Config`, `Ip6Config`, `Master`, `SpecificObject` | property get | active-connection facts (the VPN evidence source — document 03 §12) |
-| `Settings.Connection.GetSettings` | method | returns the connection's **secrets-free** settings; the credential-bearing sibling `GetSecrets` is prohibited (§2) |
-| Manager signals: `StateChanged`, `DeviceAdded`, `DeviceRemoved`, `PropertiesChanged`; per-object `PropertiesChanged` | subscription | notifications only; they change nothing |
+Treatment of the sensitive member classes: **NetworkManager settings**
+are read only via `Settings.Connection.GetSettings` (secrets-free by
+NM's own semantics — the row below); **NetworkManager secrets**
+(`Settings.Connection.GetSecrets`) are prohibited outright (§2); device
+and connection properties follow the rows below; signals are
+receive-only subscriptions.
 
-**systemd-resolved (`org.freedesktop.resolve1`) — allowed members
-(properties and signals only; every method is prohibited):**
+| Object path (pattern) | Interface | Member | Operation | Purpose (observation requirement) | Data classification |
+|---|---|---|---|---|---|
+| `/org/freedesktop/NetworkManager` | `org.freedesktop.NetworkManager` | `State`, `Version`, `Connectivity`, `NetworkingEnabled`, `WirelessEnabled`, `WwanEnabled`, `Metered`, `Startup` | Get (each) | manager overview; `Connectivity` is NM's **cached** value (NM's own past checks produced it — we never trigger one) | public-observable (enums, bools, strings) |
+| same | same | `Devices`, `AllDevices`, `ActiveConnections`, `PrimaryConnection`, `PrimaryConnectionType` | Get (each) | object-path handles for device/connection enumeration | public-observable (object paths, type strings) |
+| same | same | `GetDevices`, `GetAllDevices` | method | device enumeration (returns object paths only — pure enumeration, no state change) | public-observable |
+| same | same | `StateChanged`, `DeviceAdded`, `DeviceRemoved`, `PropertiesChanged` | AddMatch (signals) | change feed for re-observation; notifications only, change nothing | — |
+| `/org/freedesktop/NetworkManager/Devices/{N}` (paths from `Devices`/`AllDevices`/`DeviceAdded`) | `org.freedesktop.NetworkManager.Device` | `DeviceType`, `Interface`, `IpInterface`, `State`, `Driver`, `Real`, `Metered` | Get (each) | per-device observed facts (device-mapping section) | public-observable |
+| same | same | `HwAddress` | Get | device hardware address | **privacy-noted** (MAC — document 05 §9.1 redaction applies at export) |
+| same | same | `ActiveConnection` | Get | device ↔ active-connection mapping | public-observable (object path) |
+| same | same | `Ip4Config`, `Ip6Config`, `Dhcp4Config`, `Dhcp6Config` | Get (each) | correlation facts (which config object is bound). The config objects' **own** properties are **not** in the v1.0.0 allow-list: addresses are netlink-authoritative (document 03 §5) and no observation requirement names them | public-observable (object paths) |
+| same | `org.freedesktop.NetworkManager.Device.Wireless` | `Wireless`, `WirelessCapabilities` | Get (each) | Wi-Fi capability facts | public-observable |
+| same | same | `AccessPoints`, `LastScan` | Get (each) | the **current** scan-list handle; no scan is ever requested (§2: `RequestScan` prohibited); `LastScan` timestamps NM's last scan, not ours | object paths / timestamp |
+| `/org/freedesktop/NetworkManager/AccessPoint/{N}` (paths from `AccessPoints`) | `org.freedesktop.NetworkManager.AccessPoint` | `Ssid`, `Strength`, `Flags`, `WpaFlags`, `RsnFlags`, `Frequency`, `Mode` | Get (each) | Wi-Fi details (current scan list only) | `Ssid` **privacy-noted** (wireless network name — never logged, never exported; document 05 §3/§9.1); others public-observable |
+| `/org/freedesktop/NetworkManager/ActiveConnection/{N}` (paths from `ActiveConnections`) | `org.freedesktop.NetworkManager.ActiveConnection` | `Connection`, `Devices`, `State`, `Type`, `Vpn`, `Ip4Config`, `Ip6Config`, `Master`, `SpecificObject` | Get (each) | active-connection facts — the VPN evidence source (document 03 §12); `Ip4Config`/`Ip6Config` are correlation object paths as above | public-observable (object paths, enums); `Type`/`Vpn` carry the VPN classification |
+| `/org/freedesktop/NetworkManager/Settings/{N}` (paths from ActiveConnection `Connection`) | `org.freedesktop.NetworkManager.Settings.Connection` | `GetSettings` | method | the connection's **secrets-free** settings (NM's own semantics; audited); the credential-bearing sibling `GetSecrets` is prohibited (§2) | settings bundle, no secrets |
+| per-object, all read interfaces above | each interface read via Get | `PropertiesChanged` | AddMatch (signal) | per-object change notification | — |
 
-| Member | Kind | Semantics |
-|---|---|---|
-| Manager properties: `DNS`, `DNSEx`, `Domains`, `LLMNR`, `MulticastDNS`, `DNSOverTLS`, `DNSSEC`, `DNSSECNegativeTrustAnchors`, `ResolvConf`, `DNSStubListener`, `FallbackDNS`, `CacheStatistics` | property get | global resolver configuration as resolved holds it (the `DnsObservation` source — document 03 §8) |
-| Link properties (`/org/freedesktop/resolve1/link/_N`): `DNS`, `DNSEx`, `Domains`, `LLMNR`, `MulticastDNS`, `DNSOverTLS`, `DNSSEC`, `CurrentDNSServer`, `ScopesMask` | property get | per-link resolver configuration |
-| `PropertiesChanged` signals | subscription | notifications only |
+### 4.3 systemd-resolved (`org.freedesktop.resolve1`) — allowed operations (properties and signals only; **every method is prohibited**)
 
-Prohibited-with-reason highlights (the "sounds observational but is
-not" class the work order demands be identified): `CheckConnectivity`
-(forces NM to probe — network traffic we did not passively observe);
-`RequestScan` (emits management frames); `FlushCaches` (mutates
-resolver state); `ResolveHostname`/`ResolveRecord`/`ResolveService`/
-`ResolveAddress` (each **generates** DNS traffic — an active query, not
-an observation; excluded from v1.0.0 passive posture, document 03 §8).
+| Object path (pattern) | Interface | Member | Operation | Purpose (observation requirement) | Data classification |
+|---|---|---|---|---|---|
+| `/org/freedesktop/resolve1` | `org.freedesktop.resolve1.Manager` | `DNS`, `DNSEx`, `Domains`, `LLMNR`, `MulticastDNS`, `DNSOverTLS`, `DNSSEC`, `ResolvConf`, `DNSStubListener`, `FallbackDNS`, `CacheStatistics` | Get (each) | global resolver configuration as resolved holds it (the `DnsObservation` source — document 03 §8) | resolver configuration (addresses and domain strings — the product's subject matter; search domains can reveal organization) |
+| same | same | `DNSSECNegativeTrustAnchors` | Get | DNSSEC negative-trust configuration (part of the resolver configuration observation) | resolver configuration; domain strings (organization-revealing — noted) |
+| same | same | `PropertiesChanged` | AddMatch (signal) | change notification | — |
+| `/org/freedesktop/resolve1/link/{N}` | `org.freedesktop.resolve1.Link` | `DNS`, `DNSEx`, `Domains`, `LLMNR`, `MulticastDNS`, `DNSOverTLS`, `DNSSEC`, `CurrentDNSServer`, `ScopesMask` | Get (each) | per-link resolver configuration | resolver configuration (as above) |
+| same | same | `PropertiesChanged` | AddMatch (signal) | change notification | — |
 
-Enforcement mechanics (L1): one `dbus-client` module per service
-provider exposes typed functions (`nm_devices()`, `nm_connection_settings(path)`,
-`resolved_link_dns(path)`, …) whose implementations call only the
-members above; the audit (§5) mechanically cross-checks the module's
-member strings against this table. The restricted wrapper exposes no
-generic `call(member, …)` escape hatch.
+### 4.4 systemd-networkd (`org.freedesktop.network1`) — no allowed operations
+
+systemd-networkd is an anticipated optional provider (OD-02; document
+02 §11) whose concrete observation sections are a Prompt 05 finding
+(WO-02 §4). **No networkd service, object path, interface, property,
+method, or signal is allowed by this specification.** Deny-by-default
+applies to anticipation itself: any future networkd D-Bus access
+requires an explicit allow-list amendment — rows with the same
+per-operation justification as §4.2–4.3 — through review. Nothing is
+pre-approved.
+
+### 4.5 Methods that look observational but are not (prohibited with reason)
+
+`CheckConnectivity` (forces NM to probe — network traffic we did not
+passively observe); `RequestScan` (emits management frames);
+`FlushCaches` (mutates resolver state); `ResolveHostname`/
+`ResolveRecord`/`ResolveService`/`ResolveAddress` (each **generates**
+DNS traffic — an active query, not an observation; excluded from the
+v1.0.0 passive posture, document 03 §8). The same rule governs any
+future member: classification is by **documented semantics, never by
+name**; a member that cannot be confidently classified as read-only is
+excluded, and the corresponding observation is reported `unsupported`
+or `unavailable` — never fabricated.
+
+### 4.6 Enforcement mechanics (L1)
+
+One `dbus-client` module per service provider exposes typed functions
+(`nm_devices()`, `nm_connection_settings(path)`,
+`resolved_link_dns(path)`, …) whose implementations call only the rows
+above. The restricted wrapper:
+
+- exposes no free-form `(service, path, interface, member)` call and no
+  generic `call(member, …)` escape hatch — every operation is a fixed
+  function bound to an exact allow-list row;
+- implements the §4.1 primitives with their scope checks (a `Get` whose
+  tuple matches no row is denied inside the wrapper);
+- is mechanically cross-checked by the L4 audit (§5, check 5): the
+  module's member, interface, and object-path strings must be a subset
+  of the tables, which live in one reviewed source-of-truth file the
+  script consumes; `GetAll` and `GetManagedObjects` additionally have
+  explicit negative assertions (no call sites anywhere in provider
+  code).
+
+Negative tests (document 07 §4): mock services that **offer** prohibited
+members, unlisted properties, `Properties.GetAll`, and
+`ObjectManager.GetManagedObjects` — the restricted proxy must be proven
+never to call them; unknown operations are unreachable by construction,
+which the audit demonstrates.
 
 ## 5. Tauri capabilities and command exposure (L2)
 
@@ -148,9 +207,11 @@ generic `call(member, …)` escape hatch.
   no `notification`, no `dialog` (file import uses the standard HTML
   file input / drag-and-drop in the webview — no native-dialog plugin
   needed).
-- Command surface: the three IPC commands of document 04 §9 and
-  nothing else. Every command is registered explicitly; Tauri exposes
-  nothing unregistered (deny-by-default principle applied to commands).
+- Command surface: the four IPC commands of document 04 §9
+  (`get_snapshot`, `get_topology`, `subscribe_watch`,
+  `unsubscribe_watch`) and nothing else. Every command is registered
+  explicitly; Tauri exposes nothing unregistered (deny-by-default
+  principle applied to commands).
 - CSP: `default-src 'self'`; no remote origins, no inline scripts
   beyond the framework's build output; no network fetch surface at all.
 - The capability file(s) are **versioned review artifacts**: the audit
@@ -171,9 +232,11 @@ based in the spirit of the existing gate steps [REPO —
 3. No process spawning (`std::process`, `Command`) outside tests.
 4. Netlink codec construction limited to dump/subscribe message types
    (existing review-gate practice [REPO — WO-02 §5.1], mechanized).
-5. D-Bus member strings in provider modules ⊆ the allow-list tables
-   (§4); the tables live in one reviewed source-of-truth file the
-   script consumes.
+5. D-Bus member, interface, and object-path strings in provider modules
+   ⊆ the allow-list tables (§4.1–4.4); the tables live in one reviewed
+   source-of-truth file the script consumes; `Properties.GetAll` and
+   `ObjectManager.GetManagedObjects` carry explicit negative assertions
+   (no call sites in provider code — §4.1).
 6. No dependency on any HTTP/TLS/network client crate (the only
    socket-creating crates are `netlink` and the D-Bus client crate).
 7. Tauri capability permissions ⊆ the allow-list of §5.
@@ -198,7 +261,7 @@ based in the spirit of the existing gate steps [REPO —
 | Decision | Source | Status |
 |---|---|---|
 | Five-layer enforcement; seccomp deferred, not a v1.0.0 requirement | WO-02 ch. 5; work order §3.3 | approved-derived |
-| Restricted-proxy D-Bus design; semantics-verified member allow-list | Q-1; R-03; work order §3.3 | RD-25 |
+| Restricted-proxy D-Bus design; per-operation allow-list (service/path/interface/member/operation) with named-`Get`-only property access; `GetAll` and `GetManagedObjects` excluded from v1.0.0 | Q-1; R-03; work order §3.3; Prompt 03-FC §5 (FC-02) | RD-25 |
 | Properties/signals-only posture for resolved; active query methods prohibited | work order §3.3/§3.4 | approved-derived |
 | `CheckConnectivity`/`RequestScan` prohibited despite observational names | work order §3.3 ("not safe merely because observational") | approved-derived |
 | Capability set = `core:default` only; no dialog/shell/fs plugins | OD-01/OD-03; WO-02 Table 5.1 | RD-26 |
