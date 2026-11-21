@@ -268,3 +268,15 @@ mode), and is removed when the view unmounts.
   part of the gate).
 - Loading real observations in the frontend (same `NetworkSnapshot` JSON the
   CLI emits).
+
+## Design trajectory (Prompt 03 specification — not yet implemented)
+
+The backend architecture and network data model that will govern the
+implementation stages are specified in
+[`docs/design/prompt-03/`](design/prompt-03/README.md) (approved decisions
+OD-01/02/03/08/09/10 of the accepted WO-02 feasibility assessment,
+translated into crate boundaries, a provider contract, evidence semantics, a
+schema-v4 document/IPC contract, logging/diagnostics design, read-only
+enforcement, and the test strategy). This document continues to describe the
+**current** implementation; where the two differ, the spec package is the
+target and nothing in it has been built yet.
