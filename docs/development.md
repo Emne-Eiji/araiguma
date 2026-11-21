@@ -104,9 +104,11 @@ drift).
 
 ## Git workflow
 
-- Single `main` branch, local only. **No remote is configured** (GitHub
-  publication deferred until transfer to Emne's machine and independent
-  audit).
+- Current development branch: **`recovery/araiguma-main`** — local only,
+  tracking **`origin/recovery/araiguma-main`** on the GitHub remote `origin`
+  (`https://github.com/Emne-Eiji/araiguma.git`). GitHub's default `main`
+  branch is separate and unrelated — never merged into the project history
+  [REPO][HIST]. No local `main` development branch exists.
 - Repository-local identity only:
 
   ```sh

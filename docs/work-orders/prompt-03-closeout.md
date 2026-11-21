@@ -257,3 +257,31 @@ labels used throughout: [REPO] repository-verified, [DOC]
 document-verified, [ENV] environment-verified, [TEST]
 executed-test-verified, [DESIGN] design-level statement (no runtime
 claim), [UNKNOWN] none remaining for this work order.*
+
+## K. Subsequent status note (2026-11-21 — later event; this section is new, the original text above is unchanged)
+
+This closeout was written while the recovered repository was in
+transition. A later verified state (WO-GOV-RECON-01, 2026-11-21)
+replaced its publication and branch statements; both are recorded here:
+
+- **Original statements (preserved verbatim above):** after work, "no
+  remote" and branch `main`.
+- **Later verified state (WO-GOV-RECON-01):** the GitHub remote
+  `origin` = `https://github.com/Emne-Eiji/araiguma.git` now exists and is
+  public. Its default branch is `main` (commit `08e58f3`, root `72b89a4`
+  "Initial commit"), a 2-commit skeleton with **no common ancestor** with
+  the project history. The recovered project history is published on
+  **`recovery/araiguma-main`** (`3c4954f`, synced with the local branch of
+  the same name). GitHub `main` is not merged and does not carry the
+  project development history.
+- **Current development branch (as of this note):**
+  `recovery/araiguma-main` (local; tracking `origin/recovery/araiguma-main`).
+- **Cross-references:** `docs/work-orders/wo-04-stage-a-closeout.md`
+  (Stage A governance record) and `README.md` "Project authority" /
+  `docs/development.md` "Git workflow".
+- **Publishing note:** this note does not claim the publication was a
+  release or that the application was transferred; the remote README says
+  "recovery measure, not a release".
+
+All original wording above remains intact; this section only adds
+context about later events.
