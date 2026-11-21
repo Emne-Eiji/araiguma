@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="360" viewBox="0 0 560 360">
+  <rect width="560" height="360" fill="#ffffff"/>
+  <style>
+    .box { fill: #f6f8fa; stroke: #8aa3b2; stroke-width: 1.6; rx: 10; }
+    .label { font-family: system-ui, -apple-system, sans-serif; font-size: 15px; fill: #1c2530; font-weight: 600; }
+    .detail { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; fill: #475566; }
+    .edge { stroke: #8aa3b2; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M2 2 L9 5 L2 8" stroke="#8aa3b2" stroke-width="2" fill="none"/>
+    </marker>
+  </defs>
+  <!-- Source boxes -->
+  <rect class="box" x="40" y="50" width="240" height="76"/>
+  <text class="label" x="160" y="76">rtnetlink (primary, priority 0)</text>
+  <text class="detail" x="160" y="94">links · addresses · routes (all tables, multipath)</text>
+
+  <rect class="box" x="320" y="50" width="200" height="76"/>
+  <text class="label" x="420" y="76">sysfs / procfs (fallback, priority 1)</text>
+  <text class="detail" x="420" y="94">/sys/class/net · /proc/net/route · /proc/net/if_inet6 · /proc/net/ipv6_route</text>
+
+  <!-- Merge -->
+  <rect class="box" x="185" y="190" width="190" height="52"/>
+  <text class="label" x="280" y="218">Merge &amp; observation model</text>
+  <text class="detail" x="280" y="232">netlink wins · sysfs fills gaps · per-item sources</text>
+
+  <!-- Outputs -->
+  <rect class="box" x="185" y="290" width="190" height="50"/>
+  <text class="label" x="280" y="315">NetworkSnapshot</text>
+  <text class="detail" x="280" y="329">schema v3 · never-guess model</text>
+
+  <rect class="box" x="40" y="250" width="240" height="64"/>
+  <text class="label" x="160" y="275">CLI</text>
+  <text class="detail" x="160" y="293">araiguma snapshot · watch · topology --input</text>
+
+  <rect class="box" x="320" y="250" width="200" height="64"/>
+  <text class="label" x="420" y="275">Frontend</text>
+  <text class="detail" x="420" y="293">Svelte 5 + Vite browser app (mock or imported documents)</text>
+
+  <!-- Edges -->
+  <path class="edge" d="M160 126 L160 150 L280 150"/>          <!-- rtnetlink -> merge -->
+  <path class="edge" d="M280 150 L280 190"/>                     <!-- source arrows -->
+  <path class="edge" d="M420 126 L420 150 L280 150"/>           <!-- sysfs/procfs -> merge -->
+  <path class="edge" d="M280 242 L280 290"/>                     <!-- merge -> snapshot -->
+  <path class="edge" d="M280 292 L160 292 L160 250"/>           <!-- snapshot -> CLI -->
+  <path class="edge" d="M280 292 L420 292 L420 250"/>           <!-- snapshot -> frontend -->
+  <text class="detail" x="400" y="33" text-anchor="middle">Araiguma observation pipeline</text>
+</svg>
