@@ -9,6 +9,16 @@ authority:** Emne. **Execution window:** 2026-11-21T05:56Z–06:19Z UTC
 checkpointed. **This report is a delivery statement, not an acceptance
 claim.**
 
+> **Amended by Prompt 03-FC (2026-11-21).** An independent review
+> identified limited corrections, applied by the Prompt 03-FC
+> consistency-correction pass and marked **[FC-xx]** where they touch
+> statements below: FC-01 corrected the IPC surface to four commands
+> (§D.6); FC-05 documented a delivery-packaging omission of the
+> PROMPT03-SPEC bundle (§G). The original text of this report is
+> preserved verbatim in commit `0dc962b` and the
+> `araiguma-PROMPT03-CLOSEOUT` bundle; amendments are explicit, never
+> silent replacements.
+
 ## A. Repository baseline — before and after
 
 **Before work (recovery verification, 2026-11-21T06:05:58Z [REPO]):**
@@ -132,8 +142,9 @@ bounded retention and allowlist-based redaction (OD-09).
    (never inferred from naming or weak evidence).
 6. **One contract, three transports**: CLI stdout, file import, and IPC
    deliver identical documents; watch envelopes gain a monotonic `seq`
-   with snapshot-first gap recovery; three IPC commands
-   (`get_snapshot`, `get_topology`, `subscribe_watch`) with a typed
+   with snapshot-first gap recovery; the IPC command surface of
+   document 04 §9 — **[FC-01]** amended: four commands (`get_snapshot`,
+   `get_topology`, `subscribe_watch`, `unsubscribe_watch`) with a typed
    three-code error model in which observation failures live inside
    documents, never as transport errors.
 7. **Provider contract**: identity as stable strings with verbatim
@@ -191,6 +202,17 @@ standing convention; earlier artifacts untouched): [REPO]
 PROMPT03-SPEC SHA-256 (from the verified manifest): bundle
 `5d0060eb9e5e92b00c2a4b2bca6f76513c1ac842f107430194f3d23267e2c489`;
 archive `bbfe940e7a3b277c5c9b742fe0833b450b0d313964710f9dc96c861264249c5d`.
+
+> **[FC-05] Packaging omission, corrected by Prompt 03-FC:** the
+> PROMPT03-SPEC artifacts above were created and verified in the
+> workspace during execution (checksums in the manifest, bundle
+> clone-verified at `8f0451e`, 51 commits) but were **omitted from the
+> delivery ZIP** sent for review — a packaging discrepancy, not a
+> history defect. The PROMPT03-CLOSEOUT bundle (the complete 52-commit
+> history, including the specification commit) was present and
+> independently cloneable, so recovery was never at risk. The Prompt
+> 03-FC closeout report and its corrected recovery manifest document
+> the full artifact inventory.
 
 **Durable-storage note [ENV]:** the budget check passes but is within
 the 50 MB warning band on both measurements (R-04). No persistent
