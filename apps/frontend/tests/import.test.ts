@@ -120,18 +120,19 @@ describe('data source state', () => {
 
   it('starts in mock mode rendering the labeled fixtures', () => {
     expect(dataSource.mode).toBe('mock');
-    expect(currentSnapshot().interfaces.length).toBeGreaterThan(0);
-    expect(currentTopology().nodes.length).toBeGreaterThan(0);
+    expect(currentSnapshot()!.interfaces.length).toBeGreaterThan(0);
+    expect(currentTopology()!.nodes.length).toBeGreaterThan(0);
   });
 
   it('importing a snapshot switches modes and keeps per-kind provenance', () => {
     importFile('real-snapshot.json', validSnapshotText);
     expect(dataSource.mode).toBe('imported');
     expect(dataSource.snapshot?.fileName).toBe('real-snapshot.json');
-    expect(currentSnapshot().timestampMs).toBe(workstation.timestampMs);
-    // Topology still falls back to the demo document until one is imported.
+    expect(currentSnapshot()!.timestampMs).toBe(workstation.timestampMs);
+    // Imported mode never substitutes the synthetic topology for a missing
+    // imported document.
     expect(dataSource.topology).toBeNull();
-    expect(currentTopology().nodes.length).toBeGreaterThan(0);
+    expect(currentTopology()).toBeNull();
   });
 
   it('importing a topology then a snapshot keeps both independently', () => {

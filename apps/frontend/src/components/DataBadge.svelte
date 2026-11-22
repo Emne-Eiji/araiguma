@@ -1,27 +1,49 @@
 <script lang="ts">
   // Persistent, explicit marker of what the current view renders: the
-  // labeled synthetic fixtures (MOCK DATA) or imported observation
-  // documents (IMPORTED OBSERVATION — never presented as a live,
-  // continuously updating connection). One of the two is always visible.
+  // labeled synthetic fixtures (MOCK DATA), imported observation documents
+  // (IMPORTED OBSERVATION — never presented as a live connection), or the
+  // live engine pair (LIVE / STALE / UNAVAILABLE). One truthful state is
+  // always visible.
 
-  import { dataSource } from '../lib/dataMode.svelte';
+  import { dataSource, liveStatus } from '../lib/dataMode.svelte';
 
   let mode = $derived(dataSource.mode);
+  let liveState = $derived(liveStatus());
+  let label = $derived(
+    mode === 'mock'
+      ? 'MOCK DATA'
+      : mode === 'imported'
+        ? 'IMPORTED OBSERVATION'
+        : liveState === 'live'
+          ? 'LIVE'
+          : liveState === 'stale'
+            ? 'STALE'
+            : 'UNAVAILABLE',
+  );
   let title = $derived(
     mode === 'mock'
       ? 'This view shows synthetic fixture data — not a live observation of this machine'
-      : 'This view shows observation documents imported from Araiguma CLI output — a recorded observation, not a live connection',
+      : mode === 'imported'
+        ? 'This view shows observation documents imported from Araiguma CLI output — a recorded observation, not a live connection'
+        : liveState === 'live'
+          ? 'This view shows a current live observation from the Araiguma engine'
+          : liveState === 'stale'
+            ? 'This view shows the last confirmed live observation, but a newer engine state is not confirmed'
+            : 'No live observation is available from the Araiguma engine',
   );
 </script>
 
 <span
   class="badge"
   class:imported={mode === 'imported'}
-  data-testid={mode === 'mock' ? 'mock-badge' : 'imported-badge'}
+  class:live={mode === 'live' && liveState === 'live'}
+  class:stale={mode === 'live' && liveState === 'stale'}
+  class:unavailable={mode === 'live' && liveState === 'unavailable'}
+  data-testid={mode === 'mock' ? 'mock-badge' : mode === 'imported' ? 'imported-badge' : 'live-badge'}
   role="status"
   title={title}
 >
-  {mode === 'mock' ? 'MOCK DATA' : 'IMPORTED OBSERVATION'}
+  {label}
 </span>
 
 <style>
@@ -56,5 +78,35 @@
 
   .badge.imported::before {
     background: var(--accent-blue);
+  }
+
+  .badge.live {
+    border-color: color-mix(in srgb, var(--state-up) 65%, transparent);
+    color: var(--state-up);
+    background: color-mix(in srgb, var(--state-up) 12%, transparent);
+  }
+
+  .badge.live::before {
+    background: var(--state-up);
+  }
+
+  .badge.stale {
+    border-color: color-mix(in srgb, var(--state-unknown) 65%, transparent);
+    color: var(--state-unknown);
+    background: color-mix(in srgb, var(--state-unknown) 12%, transparent);
+  }
+
+  .badge.stale::before {
+    background: var(--state-unknown);
+  }
+
+  .badge.unavailable {
+    border-color: color-mix(in srgb, var(--state-unavailable) 65%, transparent);
+    color: var(--state-unavailable);
+    background: color-mix(in srgb, var(--state-unavailable) 12%, transparent);
+  }
+
+  .badge.unavailable::before {
+    background: var(--state-unavailable);
   }
 </style>

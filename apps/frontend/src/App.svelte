@@ -3,9 +3,9 @@
   // central workspace + reusable right details panel + compact bottom
   // status area. WO-01R foundation + WO-02 views + WO-03 M1 document
   // import, restructured without changing any data-fidelity behavior: the
-  // app renders either explicitly-labeled mock scenarios or imported
-  // observation documents (never presented as a live connection); the
-  // status bar says which.
+  // app renders explicitly-labeled mock scenarios, imported observation
+  // documents, or a live engine pair; the status bar says which and never
+  // presents recorded or synthetic data as live.
   //
   // Tray-compatible destinations (foundation only): the navigation store
   // exposes stable section ids and selected-object references; this shell
@@ -24,8 +24,6 @@
     importFile,
     currentSnapshot,
     currentTopology,
-    snapshotImported,
-    topologyImported,
   } from './lib/dataMode.svelte';
   import {
     navigation,
@@ -35,7 +33,7 @@
     type SectionId,
     type SelectionRef,
   } from './lib/navigation.svelte';
-  import { untrack } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
   import NavRail from './components/NavRail.svelte';
   import OverviewView from './components/OverviewView.svelte';
   import TopologyView from './components/TopologyView.svelte';
@@ -49,6 +47,11 @@
   import AppSidePanel from './components/AppSidePanel.svelte';
   import StatusBar from './components/StatusBar.svelte';
   import MissingDocument from './components/MissingDocument.svelte';
+  import {
+    initLiveMode,
+    teardownLiveMode,
+    type LiveModeTeardown,
+  } from './lib/liveMode';
 
   const section = $derived(navigation.section);
   const snapshot = $derived(currentSnapshot());
@@ -62,12 +65,38 @@
   // the current documents: the panel opens in its explicit empty state.
   let panelEmpty = $state(false);
 
+  // Desktop live mode is optional: the same shell runs unchanged in the
+  // browser with its explicit mock/imported modes. The local teardown
+  // handles the race where the component is destroyed while initialization
+  // is still awaiting its first IPC response; the module-level teardown
+  // covers an already-active session.
+  let liveTeardown: LiveModeTeardown | null = null;
+  let liveDisposed = false;
+
+  onMount(() => {
+    liveDisposed = false;
+    void initLiveMode().then((teardown) => {
+      if (liveDisposed) {
+        void teardown();
+      } else {
+        liveTeardown = teardown;
+      }
+    });
+  });
+
+  onDestroy(() => {
+    liveDisposed = true;
+    void liveTeardown?.();
+    liveTeardown = null;
+    void teardownLiveMode();
+  });
+
   // Linkage: the nodes a selected route refers to, highlighted when the
   // topology view shows it (highlight only — nothing is modified). With the
   // destination API this is reachable: "Show in Topology" keeps the route
   // selected across the section switch.
   const routeHighlight = $derived(
-    section === 'topology' && selectedRoute
+    section === 'topology' && selectedRoute && topologyDocument
       ? routeHighlightTargets(selectedRoute, topologyDocument)
       : [],
   );
@@ -91,16 +120,20 @@
   });
 
   function resolveSelection(ref: SelectionRef): void {
+    const current = currentSnapshot();
+    const currentTopologyDocument = currentTopology();
     if (ref.kind === 'interface') {
       selectedInterface =
-        currentSnapshot().interfaces.find((iface) => iface.ifindex === ref.ifindex) ?? null;
+        current?.interfaces.find((iface) => iface.ifindex === ref.ifindex) ?? null;
       panelEmpty = selectedInterface === null;
     } else if (ref.kind === 'node') {
       selectedNode =
-        currentTopology().nodes.find((node) => nodeIdKey(node.id) === ref.nodeKey) ?? null;
+        currentTopologyDocument?.nodes.find(
+          (node) => nodeIdKey(node.id) === ref.nodeKey,
+        ) ?? null;
       panelEmpty = selectedNode === null;
     } else {
-      selectedRoute = findRouteByRef(currentSnapshot().routes, ref);
+      selectedRoute = current ? findRouteByRef(current.routes, ref) : null;
       panelEmpty = selectedRoute === null;
     }
   }
@@ -130,11 +163,15 @@
     });
   });
 
-  // A view needs its document; in imported mode one may be missing when
-  // only the other kind was imported. Mock mode always has both (the
-  // active scenario's fixture pair).
-  const snapshotMissing = $derived(dataSource.mode === 'imported' && !snapshotImported());
-  const topologyMissing = $derived(dataSource.mode === 'imported' && !topologyImported());
+  // A view needs its document. Imported mode can lack one kind when only
+  // the other was imported; live mode can lack either kind until the
+  // engine delivers a coherent pair. Mock mode always has the active
+  // scenario's fixture pair.
+  const snapshotMissing = $derived(dataSource.mode !== 'mock' && snapshot === null);
+  const topologyMissing = $derived(
+    dataSource.mode !== 'mock' && topologyDocument === null,
+  );
+  const missingMode = $derived(dataSource.mode === 'live' ? 'live' : 'imported');
 
   // ── The shared details panel ─────────────────────────────────────────────
   const panelOpen = $derived(
@@ -299,8 +336,8 @@
           <OverviewView />
         {:else if section === 'topology'}
           {#if topologyMissing}
-            <MissingDocument kind="topology" />
-          {:else}
+            <MissingDocument kind="topology" mode={missingMode} />
+          {:else if topologyDocument}
             <TopologyView
               document={topologyDocument}
               highlight={routeHighlight}
@@ -309,14 +346,14 @@
           {/if}
         {:else if section === 'interfaces'}
           {#if snapshotMissing}
-            <MissingDocument kind="snapshot" />
-          {:else}
+            <MissingDocument kind="snapshot" mode={missingMode} />
+          {:else if snapshot}
             <InterfacesView {snapshot} onselect={(iface) => (selectedInterface = iface)} />
           {/if}
         {:else if section === 'routes'}
           {#if snapshotMissing}
-            <MissingDocument kind="snapshot" />
-          {:else}
+            <MissingDocument kind="snapshot" mode={missingMode} />
+          {:else if snapshot}
             <RoutesView
               {snapshot}
               {selectedRoute}
@@ -325,8 +362,8 @@
           {/if}
         {:else if section === 'providers'}
           {#if snapshotMissing}
-            <MissingDocument kind="snapshot" />
-          {:else}
+            <MissingDocument kind="snapshot" mode={missingMode} />
+          {:else if snapshot}
             <ProvidersView {snapshot} />
           {/if}
         {:else}
@@ -346,9 +383,9 @@
       onclose={closePanel}
     >
       {#snippet children()}
-        {#if selectedInterface}
+        {#if selectedInterface && snapshot}
           <DetailsPanel iface={selectedInterface} {snapshot} />
-        {:else if selectedNode}
+        {:else if selectedNode && topologyDocument}
           <TopologyDetails node={selectedNode} document={topologyDocument} />
         {:else if selectedRoute}
           <RouteDetails route={selectedRoute} />

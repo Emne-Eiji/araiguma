@@ -2,18 +2,21 @@
 // (WO-04 Stage A). Pure functions over a plain view of the data-source
 // state — unit-tested without any Svelte runtime.
 //
-// The five states a document kind can be in, and what each honestly means:
+// The states a document kind can be in, and what each honestly means:
 //   imported-ok   — a valid document of this kind is imported and rendered
 //   missing       — imported mode, but this kind was never imported: the
 //                   views that need it say so explicitly (never mock data)
 //   not-observed  — mock mode: no real document exists for this kind; the
 //                   labeled synthetic scenario is shown instead
+//   live-ok / live-stale / live-unavailable — live mode's truthful engine
+//                   document state; no imported or synthetic provenance is
+//                   substituted for it
 // plus the outcome of the most recent import attempt (accepted, or
 // rejected as either 'unsupported' (e.g. an unknown schema version) or
 // 'invalid' (failed validation)). No state is ever invented: everything is
 // derived from the data-source state and the validators' own messages.
 
-import type { ImportAttempt } from './dataMode.svelte';
+import type { DataMode, ImportAttempt } from './dataMode.svelte';
 
 export type DocumentKind = 'snapshot' | 'topology';
 
@@ -31,7 +34,13 @@ export function classifyRejection(reason: string): RejectionClass {
   return /unsupported schema\s?version/i.test(reason) ? 'unsupported' : 'invalid';
 }
 
-export type DocumentSlotStatus = 'imported-ok' | 'missing' | 'not-observed';
+export type DocumentSlotStatus =
+  | 'imported-ok'
+  | 'missing'
+  | 'not-observed'
+  | 'live-ok'
+  | 'live-stale'
+  | 'live-unavailable';
 
 export interface DocumentSlotView {
   kind: DocumentKind;
@@ -51,13 +60,19 @@ export interface DocumentSlotView {
 /** Minimal plain view of the data-source state (the store object satisfies
  *  this structurally; tests pass a plain object). */
 export interface DocumentsStateView {
-  mode: 'mock' | 'imported';
+  mode: DataMode;
   snapshot: { fileName: string; importedAtMs: number; document: { timestampMs: number } } | null;
   topology: {
     fileName: string;
     importedAtMs: number;
     document: { sourceTimestampMs: number };
   } | null;
+  /** Live documents are optional in this plain view so existing callers
+   *  that exercise mock/imported modes need not provide them. */
+  liveSnapshot?: { document: { timestampMs: number } } | null;
+  liveTopology?: { document: { sourceTimestampMs: number } } | null;
+  liveStale?: boolean;
+  liveUnavailable?: string | null;
   mockScenarioName: string;
 }
 
@@ -98,6 +113,33 @@ export function documentViews(state: DocumentsStateView, lastImport: ImportAttem
 }
 
 function slotView(kind: DocumentKind, state: DocumentsStateView): DocumentSlotView {
+  if (state.mode === 'live') {
+    const liveSlot = kind === 'snapshot' ? state.liveSnapshot : state.liveTopology;
+    if (!liveSlot) {
+      return {
+        kind,
+        status: 'live-unavailable',
+        fileName: null,
+        observedAt: null,
+        importedAt: null,
+        scenarioName: null,
+      };
+    }
+    const observedAt = formatTime(
+      kind === 'snapshot'
+        ? (liveSlot.document as { timestampMs: number }).timestampMs
+        : (liveSlot.document as { sourceTimestampMs: number }).sourceTimestampMs,
+    );
+    return {
+      kind,
+      status: state.liveStale ? 'live-stale' : 'live-ok',
+      fileName: null,
+      observedAt,
+      importedAt: null,
+      scenarioName: null,
+    };
+  }
+
   const slot = kind === 'snapshot' ? state.snapshot : state.topology;
   if (slot !== null) {
     return {

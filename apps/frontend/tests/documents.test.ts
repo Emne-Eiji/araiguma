@@ -119,6 +119,24 @@ describe('document slot states', () => {
     expect(views.topologySlot.status).toBe('imported-ok');
     expect(views.snapshotSlot.status).toBe('missing');
   });
+
+  it('live mode reports live provenance instead of the mock scenario', () => {
+    const views = documentViews(
+      {
+        ...baseState,
+        mode: 'live',
+        liveSnapshot: { document: { timestampMs: 1731000000000 } },
+        liveTopology: { document: { sourceTimestampMs: 1731000000000 } },
+        liveStale: false,
+      },
+      null,
+    );
+    expect(views.snapshotSlot.status).toBe('live-ok');
+    expect(views.topologySlot.status).toBe('live-ok');
+    expect(views.snapshotSlot.observedAt).toContain('UTC');
+    expect(views.snapshotSlot.scenarioName).toBeNull();
+    expect(views.topologySlot.scenarioName).toBeNull();
+  });
 });
 
 describe('import attempts recorded through the real store', () => {

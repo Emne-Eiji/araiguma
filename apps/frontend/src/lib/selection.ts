@@ -21,24 +21,24 @@ export interface SelectionState {
 
 export function reResolveSelections(
   selection: SelectionState,
-  snapshot: NetworkSnapshot,
-  topology: TopologyDocument,
+  snapshot: NetworkSnapshot | null,
+  topology: TopologyDocument | null,
 ): SelectionState {
   return {
     interface:
-      selection.interface === null
+      selection.interface === null || snapshot === null
         ? null
         : (snapshot.interfaces.find(
             (iface) => iface.ifindex === selection.interface!.ifindex,
           ) ?? null),
     node:
-      selection.node === null
+      selection.node === null || topology === null
         ? null
         : (topology.nodes.find(
             (candidate) => nodeIdKey(candidate.id) === nodeIdKey(selection.node!.id),
           ) ?? null),
     route:
-      selection.route === null
+      selection.route === null || snapshot === null
         ? null
         : (snapshot.routes.find((candidate) => sameRouteIdentity(candidate, selection.route!)) ??
           null),

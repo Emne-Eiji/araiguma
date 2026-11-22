@@ -8,6 +8,7 @@
     dataSource,
     currentSnapshot,
     currentTopology,
+    liveStatus,
     snapshotImported,
     topologyImported,
   } from '../lib/dataMode.svelte';
@@ -18,14 +19,15 @@
   import DataBadge from './DataBadge.svelte';
 
   const scenario = $derived(scenarioById(dataSource.mockScenario));
-  const snapshotAvailable = $derived(dataSource.mode === 'mock' || snapshotImported());
-  const topologyAvailable = $derived(dataSource.mode === 'mock' || topologyImported());
+  const liveState = $derived(liveStatus());
 
   const snapshot = $derived(currentSnapshot());
   const topologyDocument = $derived(currentTopology());
 
   const providerSummary = $derived(
-    snapshot.providers.map((p) => `${p.provider}: ${p.state}`).join(' · '),
+    snapshot
+      ? snapshot.providers.map((p) => `${p.provider}: ${p.state}`).join(' · ')
+      : '',
   );
 
   // Section links exclude the overview itself (the user is already here);
@@ -59,6 +61,41 @@
           Scenario <strong>{scenario.name}</strong> — {scenario.description}.
         </p>
         <p class="provenance-note">{scenario.provenance}.</p>
+      {:else if dataSource.mode === 'live'}
+        <ul class="doc-list">
+          <li>
+            <span class="doc-kind">Snapshot</span>
+            {#if dataSource.live}
+              <span class="mono">live engine observation</span>
+              observed {formatObservationTime(dataSource.live.timestampMs)}
+            {:else}
+              <span class="missing-note">
+                no live snapshot is available — the views that need it say so explicitly
+              </span>
+            {/if}
+          </li>
+          <li>
+            <span class="doc-kind">Topology</span>
+            {#if dataSource.liveTopology}
+              <span class="mono">live engine projection</span>
+              from an observation of
+              {formatObservationTime(dataSource.liveTopology.sourceTimestampMs)}
+            {:else}
+              <span class="missing-note">
+                no live topology is available — the topology view says so explicitly
+              </span>
+            {/if}
+          </li>
+        </ul>
+        <p class="provenance-note">
+          {#if liveState === 'live'}
+            A live engine observation projected from the same validated snapshot.
+          {:else if liveState === 'stale'}
+            The last confirmed live observation remains visible, but its newer engine state is not confirmed.
+          {:else}
+            No live observation is currently available; no imported or synthetic document is presented as live.
+          {/if}
+        </p>
       {:else}
         <ul class="doc-list">
           <li>
@@ -93,7 +130,7 @@
       {/if}
 
       <dl class="counts">
-        {#if snapshotAvailable}
+        {#if snapshot}
           <dt>Observed interfaces</dt>
           <dd class="mono">{snapshot.interfaces.length}</dd>
           <dt>Observed addresses</dt>
@@ -104,16 +141,24 @@
           <dd>{providerSummary}</dd>
         {:else}
           <dt>Snapshot</dt>
-          <dd class="missing-note">no snapshot document imported</dd>
+          <dd class="missing-note">
+            {dataSource.mode === 'live'
+              ? 'no live snapshot document available'
+              : 'no snapshot document imported'}
+          </dd>
         {/if}
-        {#if topologyAvailable}
+        {#if topologyDocument}
           <dt>Topology nodes</dt>
           <dd class="mono">{topologyDocument.nodes.length}</dd>
           <dt>Evidenced relations</dt>
           <dd class="mono">{topologyDocument.edges.length}</dd>
         {:else}
           <dt>Topology</dt>
-          <dd class="missing-note">no topology document imported</dd>
+          <dd class="missing-note">
+            {dataSource.mode === 'live'
+              ? 'no live topology document available'
+              : 'no topology document imported'}
+          </dd>
         {/if}
       </dl>
     </section>

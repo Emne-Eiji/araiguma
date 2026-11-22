@@ -8,6 +8,7 @@
 
   import {
     dataSource,
+    liveStatus,
     selectMockScenario,
     type ImportAttempt,
   } from '../lib/dataMode.svelte';
@@ -26,6 +27,12 @@
         mode: dataSource.mode,
         snapshot: dataSource.snapshot,
         topology: dataSource.topology,
+        liveSnapshot: dataSource.live ? { document: dataSource.live } : null,
+        liveTopology: dataSource.liveTopology
+          ? { document: dataSource.liveTopology }
+          : null,
+        liveStale: liveStatus() !== 'live',
+        liveUnavailable: dataSource.liveUnavailable ?? dataSource.liveMonitorReason,
         mockScenarioName: scenario.name,
       },
       lastImport,
@@ -50,6 +57,21 @@
       label: 'not observed',
       tone: 'muted',
       note: 'no real document of this kind: the labeled synthetic scenario is shown instead',
+    },
+    'live-ok': {
+      label: 'live current',
+      tone: 'ok',
+      note: 'validated live engine document, current with the active watch',
+    },
+    'live-stale': {
+      label: 'live stale',
+      tone: 'missing',
+      note: 'the last confirmed live document is visible, but a newer engine state is not confirmed',
+    },
+    'live-unavailable': {
+      label: 'live unavailable',
+      tone: 'missing',
+      note: 'no live document of this kind is available from the engine',
     },
   };
 
@@ -128,6 +150,19 @@
             Produce one with <span class="mono">{slotProduceHint(slot.kind)}</span>
             and import it above, or return to the demonstration data.
           </p>
+        {:else if slot.status === 'live-ok'}
+          <dl class="slot-facts">
+            <dt>Observed</dt>
+            <dd>{slot.observedAt} <span class="hint">(live engine observation)</span></dd>
+          </dl>
+          <p class="slot-note">{meta.note}.</p>
+        {:else if slot.status === 'live-stale'}
+          <p class="slot-note">{meta.note}.</p>
+          {#if dataSource.liveMonitorReason ?? dataSource.liveUnavailable}
+            <p class="slot-note">{dataSource.liveMonitorReason ?? dataSource.liveUnavailable}.</p>
+          {/if}
+        {:else if slot.status === 'live-unavailable'}
+          <p class="slot-note">{meta.note}.</p>
         {:else}
           <p class="slot-note">{meta.note}.</p>
           <p class="produce">
@@ -188,7 +223,7 @@
   <section class="panel scenarios-panel" aria-label="Demonstration scenarios">
     <header class="slot-head">
       <h2>Demonstration scenarios</h2>
-      {#if dataSource.mode === 'imported'}
+      {#if dataSource.mode !== 'mock'}
         <span class="status muted">selecting returns to mock data</span>
       {/if}
     </header>

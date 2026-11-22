@@ -1,20 +1,45 @@
 <script lang="ts">
-  // Shown when the current view needs a document kind that has not been
-  // imported (e.g. a topology view with only a snapshot imported). The
-  // message names what is missing and how to produce it — never a blank
-  // screen and never silently substituted mock data.
-  let { kind }: { kind: 'snapshot' | 'topology' } = $props();
+  // Shown when the current view needs a document kind that is unavailable
+  // in the active mode. The message names what is missing — never a blank
+  // screen and never silently substituted mock or imported data.
+  let {
+    kind,
+    mode,
+  }: {
+    kind: 'snapshot' | 'topology';
+    mode: 'imported' | 'live';
+  } = $props();
+
+  const title = $derived(
+    mode === 'live'
+      ? kind === 'snapshot'
+        ? 'No live snapshot available'
+        : 'No live topology available'
+      : kind === 'snapshot'
+        ? 'No snapshot imported'
+        : 'No topology document imported',
+  );
+
+  const body = $derived(
+    mode === 'live'
+      ? kind === 'snapshot'
+        ? 'The live engine has not delivered a validated observation snapshot. No imported or synthetic document is substituted for live data.'
+        : 'The live engine has not delivered a validated topology projection. No imported or synthetic document is substituted for live data.'
+      : kind === 'snapshot'
+        ? 'The Overview, Routes, and Provider status views render an observation snapshot. Import one produced by the Araiguma CLI (araiguma snapshot > snapshot.json), or return to the demonstration data.'
+        : 'The Topology view renders a topology document projected from a snapshot. Produce one with the Araiguma CLI (araiguma topology --input snapshot.json > topology.json) and import it, or return to the demonstration data.',
+  );
 </script>
 
 <div class="missing" data-testid="missing-{kind}-notice">
-  <h1>{kind === 'snapshot' ? 'No snapshot imported' : 'No topology document imported'}</h1>
-  <p>
-    {kind === 'snapshot'
-      ? 'The Overview, Routes, and Provider status views render an observation snapshot. Import one produced by the Araiguma CLI (araiguma snapshot > snapshot.json), or return to the demonstration data.'
-      : 'The Topology view renders a topology document projected from a snapshot. Produce one with the Araiguma CLI (araiguma topology --input snapshot.json > topology.json) and import it, or return to the demonstration data.'}
-  </p>
+  <h1>{title}</h1>
+  <p>{body}</p>
   <p class="hint">
-    Imported documents are validated in full before anything is displayed.
+    {#if mode === 'live'}
+      Live documents are validated in full before anything is displayed.
+    {:else}
+      Imported documents are validated in full before anything is displayed.
+    {/if}
   </p>
 </div>
 
