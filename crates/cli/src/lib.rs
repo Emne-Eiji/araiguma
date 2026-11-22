@@ -14,18 +14,10 @@
 //! snapshot, never hidden.
 
 use std::io::Read as _;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use araiguma_core::provider::DiscoveryProvider;
-use araiguma_core::{
-    build_topology, diff_snapshots, merge, NetworkEvent, NetworkSnapshot, TopologyDocument,
-};
-use araiguma_netlink::{Monitor, NetlinkProvider, Signal};
-use araiguma_sysfs::SysFsProvider;
-
-/// How long the watch loop keeps absorbing bursty notifications before it
-/// re-observes (bursty kernel updates collapse into one diff).
-const DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
+use araiguma_core::{build_topology, NetworkSnapshot, TopologyDocument};
+use araiguma_engine::{ChangeFeed, Engine};
+use araiguma_netlink::Signal;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -115,21 +107,9 @@ pub fn parse_args(args: &[String]) -> Result<Command, String> {
     }
 }
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-/// Observe once through both providers and merge.
+/// Observe once through the shared engine and merge.
 pub async fn observe_merged() -> NetworkSnapshot {
-    let mut netlink = NetlinkProvider::new();
-    let mut sysfs = SysFsProvider::new();
-    // Observe netlink first: it is the authoritative source, and sysfs
-    // only fills gaps during the merge.
-    let observations = vec![netlink.observe().await, sysfs.observe().await];
-    merge(observations, now_ms())
+    Engine::default_providers().observe_now().await
 }
 
 /// Serialize a snapshot for `araiguma snapshot`.
@@ -176,136 +156,86 @@ pub fn project_snapshot_to_topology(input: Option<&str>) -> Result<TopologyDocum
     };
     let value: serde_json::Value =
         serde_json::from_str(&raw).map_err(|error| format!("invalid JSON: {error}"))?;
-    let version = value
-        .get("schemaVersion")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| {
-            "invalid snapshot document: schemaVersion must be a non-negative integer".to_string()
-        })?;
-    match version {
-        v if v == u64::from(araiguma_core::snapshot::SNAPSHOT_SCHEMA_VERSION) => {}
-        2 => {
-            // v2 documents (three-state MAC, pre-veth/multipath) parse
-            // under the v3 model: every v3 addition is defaulted
-            // (`peerIfindex`, `nextHops`) or backward-compatible. The MAC
-            // rule already rejects ambiguity. A route without `nextHops`
-            // is single-path by construction — pre-M3 documents could not
-            // represent multipath hop lists.
-        }
-        1 => {
-            // v1 is acceptable only where its macAddress fields are
-            // unambiguous (non-null). A null fails with a clear reason.
-            if let Some(interfaces) = value.get("interfaces").and_then(|v| v.as_array()) {
-                for (index, iface) in interfaces.iter().enumerate() {
-                    if iface.get("macAddress").is_some_and(|m| m.is_null()) {
-                        return Err(format!(
-                            "invalid snapshot at $.interfaces[{index}].macAddress: null is \
-                             ambiguous in schema v1 (it could mean either \"observed no hardware \
-                             address\" or \"not observed\"); re-export the document with the \
-                             current araiguma CLI, which writes unambiguous v2 documents"
-                        ));
-                    }
-                }
-            }
-        }
-        other => {
-            return Err(format!(
-                "unsupported snapshot schemaVersion {other} (this build reads \
-                 {SNAPSHOT_VERSION} documents)",
-                SNAPSHOT_VERSION = araiguma_core::snapshot::SNAPSHOT_SCHEMA_VERSION
-            ))
-        }
-    }
-    let snapshot: NetworkSnapshot = serde_json::from_value(value)
-        .map_err(|error| format!("invalid snapshot document: {error}"))?;
-    // Provenance contract (WO-03-F / AUD-06): an observation without a
-    // source is not a valid observation, and the projection refuses to
-    // invent one.
-    snapshot
-        .validate_provenance()
-        .map_err(|error| format!("invalid snapshot document: {error}"))?;
+    // The ONE document boundary (OD-03, document 04 §5): the same
+    // validation the desktop IPC path applies to a caller-supplied
+    // document. Version policy and the provenance contract are enforced
+    // there, so the CLI and the IPC accept and reject the same documents
+    // for the same reasons.
+    let snapshot = araiguma_core::parse_snapshot_document(value)?;
     Ok(build_topology(&snapshot))
-}
-
-/// The watch event envelopes (newline-delimited JSON, one per line).
-pub fn snapshot_envelope(snapshot: &NetworkSnapshot) -> String {
-    serde_json::json!({
-        "event": "snapshot",
-        "snapshot": snapshot,
-    })
-    .to_string()
-}
-
-pub fn changed_envelope(kinds: &[&str], changes: &[NetworkEvent]) -> String {
-    serde_json::json!({
-        "event": "changed",
-        "notifiedBy": kinds,
-        "changes": changes,
-    })
-    .to_string()
-}
-
-pub fn resynchronized_envelope(changes: &[NetworkEvent], snapshot: &NetworkSnapshot) -> String {
-    serde_json::json!({
-        "event": "resynchronized",
-        "changes": changes,
-        "snapshot": snapshot,
-    })
-    .to_string()
 }
 
 /// Run the watch loop, writing NDJSON events to `out`. Stops when `stop`
 /// resolves (SIGINT/SIGTERM in the binary; anything else in tests).
+///
+/// The output is the existing CLI watch contract, unchanged: one envelope
+/// per line — `snapshot` (the initial state), `changed` (a debounced pure
+/// diff), `resynchronized` (a monitoring gap: changes during the gap were
+/// NOT observed, and the fresh snapshot is authoritative). The engine is
+/// shared with the desktop shell; only the transport differs.
 pub async fn run_watch<F: std::future::Future<Output = ()>>(
     out: &mut dyn std::io::Write,
     stop: &mut std::pin::Pin<&mut F>,
 ) -> Result<(), String> {
-    let mut monitor = Monitor::start().map_err(|error| {
-        format!("cannot start netlink monitoring: {error}. Observation-only mode is available via `araiguma snapshot`.")
+    let feed = araiguma_engine::default_change_feed().map_err(|error| {
+        format!(
+            "cannot start netlink monitoring: {error}. \
+             Observation-only mode is available via `araiguma snapshot`."
+        )
     })?;
+    run_watch_with_feed(out, stop, feed, Engine::default_providers()).await
+}
 
-    let mut last = observe_merged().await;
-    writeln!(out, "{}", snapshot_envelope(&last)).map_err(io_error)?;
+async fn run_watch_with_feed<F, S>(
+    out: &mut dyn std::io::Write,
+    stop: &mut std::pin::Pin<&mut S>,
+    mut feed: F,
+    mut engine: Engine,
+) -> Result<(), String>
+where
+    F: ChangeFeed,
+    S: std::future::Future<Output = ()>,
+{
+    // The opening envelope: the current state, before any change arrives.
+    let opening = engine.snapshot_envelope().await;
+    writeln!(out, "{}", opening.to_cli_json_string()).map_err(io_error)?;
 
     loop {
         let signal = tokio::select! {
             _ = &mut *stop => return Ok(()),
-            signal = monitor.next_signal() => signal,
+            signal = feed.next_signal() => signal,
         };
-        match signal {
-            Signal::Resynchronized => {
-                let fresh = observe_merged().await;
-                let changes = diff_snapshots(&last, &fresh);
-                writeln!(out, "{}", resynchronized_envelope(&changes, &fresh)).map_err(io_error)?;
-                last = fresh;
-            }
+        let Some(signal) = signal else {
+            return Ok(());
+        };
+        let envelope = match signal {
+            // Monitor-health transitions are desktop IPC control signals.
+            // The CLI watch contract remains exactly three envelopes: it
+            // waits through a disconnect/reconnect and emits the same
+            // `resynchronized` document event as before.
+            Signal::Disconnected | Signal::ReconnectFailed { .. } => continue,
+            Signal::Resynchronized | Signal::Reconnected => engine.apply_resync().await,
             Signal::Changed { kind } => {
                 // Debounce: absorb the rest of a notification burst.
-                let mut kinds = vec![kind];
-                let mut resync = false;
-                let deadline = tokio::time::Instant::now() + DEBOUNCE;
-                while !resync {
-                    let next = tokio::select! {
-                        _ = &mut *stop => return Ok(()),
-                        next = tokio::time::timeout_at(deadline, monitor.next_signal()) => next,
-                    };
-                    match next {
-                        Ok(Signal::Changed { kind }) => kinds.push(kind),
-                        Ok(Signal::Resynchronized) => resync = true,
-                        Err(_elapsed) => break, // quiet window over
-                    }
-                }
-                let fresh = observe_merged().await;
-                let changes = diff_snapshots(&last, &fresh);
-                if resync {
-                    writeln!(out, "{}", resynchronized_envelope(&changes, &fresh))
-                        .map_err(io_error)?;
+                let Some(burst) =
+                    araiguma_engine::debounce(&mut feed, kind.to_string(), stop).await
+                else {
+                    return Ok(());
+                };
+                if burst.monitor_degraded.is_some() {
+                    // The monitor-health fact is desktop-only. The CLI
+                    // waits through the disconnect/reconnect and emits the
+                    // same resynchronized document event as before; the
+                    // interrupted change burst is not a trusted pure diff.
+                    continue;
+                } else if burst.resync {
+                    engine.apply_resync().await
                 } else {
-                    writeln!(out, "{}", changed_envelope(&kinds, &changes)).map_err(io_error)?;
+                    engine.apply_change(burst.notified_by).await
                 }
-                last = fresh;
             }
-        }
+        };
+        writeln!(out, "{}", envelope.to_cli_json_string()).map_err(io_error)?;
     }
 }
 
@@ -316,6 +246,39 @@ fn io_error(error: std::io::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn monitor_health_transitions_do_not_change_the_cli_event_contract() {
+        use araiguma_engine::FakeFeed;
+
+        let mut output = Vec::new();
+        let mut stop = std::pin::pin!(std::future::pending::<()>());
+        let feed = FakeFeed::new(vec![
+            // The health transition occurs inside the change debounce
+            // window; the CLI must still expose only its three-event
+            // contract and no partial pure-diff event.
+            Signal::Changed { kind: "newLink" },
+            Signal::Disconnected,
+            Signal::ReconnectFailed {
+                reason: "synthetic reconnect failure".to_string(),
+            },
+            Signal::Reconnected,
+        ]);
+        run_watch_with_feed(&mut output, &mut stop, feed, Engine::new(Vec::new()))
+            .await
+            .expect("watch completes when the feed ends");
+
+        let lines = String::from_utf8(output).expect("UTF-8 NDJSON");
+        let values: Vec<serde_json::Value> = lines
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("valid NDJSON"))
+            .collect();
+        assert_eq!(values.len(), 2);
+        assert_eq!(values[0]["event"], "snapshot");
+        assert_eq!(values[1]["event"], "resynchronized");
+        assert!(values.iter().all(|value| value.get("seq").is_none()));
+        assert!(values.iter().all(|value| value["event"] != "monitorHealth"));
+    }
 
     #[test]
     fn argument_parsing() {
@@ -331,53 +294,6 @@ mod tests {
         assert_eq!(a(&["--version"]), Ok(Command::Version));
         assert!(a(&["frobnicate"]).is_err());
         assert!(a(&["watch", "--pretty"]).is_err());
-    }
-
-    #[test]
-    fn snapshot_envelope_shape() {
-        let snapshot = NetworkSnapshot {
-            schema_version: araiguma_core::snapshot::SNAPSHOT_SCHEMA_VERSION,
-            timestamp_ms: 42,
-            interfaces: vec![],
-            addresses: vec![],
-            routes: vec![],
-            providers: vec![],
-        };
-        let value: serde_json::Value = serde_json::from_str(&snapshot_envelope(&snapshot)).unwrap();
-        assert_eq!(value["event"], "snapshot");
-        assert_eq!(
-            value["snapshot"]["schemaVersion"],
-            serde_json::json!(araiguma_core::snapshot::SNAPSHOT_SCHEMA_VERSION)
-        );
-        assert_eq!(value["snapshot"]["timestampMs"], 42);
-    }
-
-    #[test]
-    fn changed_envelope_shape() {
-        let value: serde_json::Value = serde_json::from_str(&changed_envelope(
-            &["newLink", "newRoute"],
-            &[NetworkEvent::Resynchronized],
-        ))
-        .unwrap();
-        assert_eq!(value["event"], "changed");
-        assert_eq!(value["notifiedBy"][0], "newLink");
-        assert_eq!(value["changes"][0], "resynchronized");
-    }
-
-    #[test]
-    fn resynchronized_envelope_includes_full_snapshot() {
-        let snapshot = NetworkSnapshot {
-            schema_version: araiguma_core::snapshot::SNAPSHOT_SCHEMA_VERSION,
-            timestamp_ms: 43,
-            interfaces: vec![],
-            addresses: vec![],
-            routes: vec![],
-            providers: vec![],
-        };
-        let value: serde_json::Value =
-            serde_json::from_str(&resynchronized_envelope(&[], &snapshot)).unwrap();
-        assert_eq!(value["event"], "resynchronized");
-        assert!(value["snapshot"]["interfaces"].is_array());
     }
 
     /// Write `document` to a unique temp file and project it — the same

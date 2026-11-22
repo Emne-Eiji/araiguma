@@ -1,0 +1,28 @@
+[package]
+name = "araiguma-desktop"
+description = "Araiguma desktop application shell (Tauri 2). Window, live IPC, app lifecycle. See docs/design/prompt-03/01 §7.3."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+# Production/native verification builds embed `frontendDist` through Tauri's
+# custom protocol. The Tauri CLI's development mode leaves this feature off.
+custom-protocol = ["tauri/custom-protocol"]
+
+[dependencies]
+araiguma-core = { workspace = true }
+araiguma-engine = { workspace = true }
+araiguma-netlink = { workspace = true }
+tauri = { version = "=2.12.7" }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }
+
+[build-dependencies]
+tauri-build = { version = "=2.7.6" }

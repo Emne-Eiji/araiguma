@@ -125,6 +125,71 @@ impl NetworkSnapshot {
     }
 }
 
+/// Parse and validate a snapshot document at the document boundary.
+///
+/// This is the ONE document boundary (OD-03, document 04 §5): the CLI
+/// file/stdin path and the Tauri IPC path both call it, so a document
+/// accepted by one transport is accepted by the other, and a document
+/// rejected by one is rejected by the other for the same reason.
+///
+/// The version policy is unchanged from the CLI implementation: the current
+/// version is written; v2 and v3 documents parse unchanged (every addition
+/// is defaulted); v1 is accepted only where it is unambiguous (a null
+/// `macAddress` is rejected with an explanation); unknown versions are
+/// rejected with the supported range stated. The provenance contract
+/// (AUD-06) is enforced for every accepted document.
+pub fn parse_snapshot_document(value: serde_json::Value) -> Result<NetworkSnapshot, String> {
+    let version = value
+        .get("schemaVersion")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| {
+            "invalid snapshot document: schemaVersion must be a non-negative integer".to_string()
+        })?;
+    match version {
+        v if v == u64::from(SNAPSHOT_SCHEMA_VERSION) => {}
+        2 => {
+            // v2 documents (three-state MAC, pre-veth/multipath) parse
+            // under the v3 model: every v3 addition is defaulted
+            // (`peerIfindex`, `nextHops`) or backward-compatible. The MAC
+            // rule already rejects ambiguity. A route without `nextHops`
+            // is single-path by construction — pre-M3 documents could not
+            // represent multipath hop lists.
+        }
+        1 => {
+            // v1 is acceptable only where its macAddress fields are
+            // unambiguous (non-null). A null fails with a clear reason.
+            if let Some(interfaces) = value.get("interfaces").and_then(|v| v.as_array()) {
+                for (index, iface) in interfaces.iter().enumerate() {
+                    if iface.get("macAddress").is_some_and(|m| m.is_null()) {
+                        return Err(format!(
+                            "invalid snapshot at $.interfaces[{index}].macAddress: null is \
+                             ambiguous in schema v1 (it could mean either \"observed no hardware \
+                             address\" or \"not observed\"); re-export the document with the \
+                             current araiguma CLI, which writes unambiguous v2 documents"
+                        ));
+                    }
+                }
+            }
+        }
+        other => {
+            return Err(format!(
+                "unsupported snapshot schemaVersion {other} (this build reads \
+                 {SNAPSHOT_VERSION} documents)",
+                SNAPSHOT_VERSION = SNAPSHOT_SCHEMA_VERSION
+            ))
+        }
+    }
+    let snapshot: NetworkSnapshot = serde_json::from_value(value)
+        .map_err(|error| format!("invalid snapshot document: {error}"))?;
+    // Provenance contract (WO-03-F / AUD-06): an observation without a
+    // source is not a valid observation, and the projection refuses to
+    // invent one.
+    snapshot
+        .validate_provenance()
+        .map_err(|error| format!("invalid snapshot document: {error}"))?;
+    Ok(snapshot)
+}
+
 /// A change between two snapshots (see [`diff_snapshots`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -32,7 +32,10 @@ pub use provider::{
     DiscoveryProvider, ProviderId, ProviderObservation, ProviderReport, ProviderState, SectionKind,
     SectionOutcome, SectionReport, SectionResult,
 };
-pub use snapshot::{diff_snapshots, interface_changed_fields, NetworkEvent, NetworkSnapshot};
+pub use snapshot::{
+    diff_snapshots, interface_changed_fields, parse_snapshot_document, NetworkEvent,
+    NetworkSnapshot, SNAPSHOT_SCHEMA_VERSION,
+};
 pub use topology::{
     build_topology, EdgeKind, Evidence, NodeDetail, NodeId, NodeKind, NodeState, TopologyDocument,
     TopologyEdge, TopologyNode, TOPOLOGY_SCHEMA_VERSION,

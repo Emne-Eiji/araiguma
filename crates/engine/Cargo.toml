@@ -1,0 +1,17 @@
+[package]
+name = "araiguma-engine"
+description = "Shared observation engine: providers, change feeds, envelopes. Owned by the CLI and the desktop shell."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+araiguma-core = { workspace = true }
+araiguma-netlink = { workspace = true }
+araiguma-sysfs = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }

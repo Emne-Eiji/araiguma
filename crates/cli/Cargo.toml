@@ -16,7 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 araiguma-core = { workspace = true }
-araiguma-sysfs = { workspace = true }
+araiguma-engine = { workspace = true }
 araiguma-netlink = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }

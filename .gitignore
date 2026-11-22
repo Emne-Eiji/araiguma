@@ -12,6 +12,9 @@ apps/frontend/.vite/
 coverage/
 *.tsbuildinfo
 
+# Tauri-generated capability schemas (the source capability file is tracked)
+/apps/desktop/gen/schemas/
+
 # Environment / secrets
 .env
 .env.*
