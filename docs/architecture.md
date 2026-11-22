@@ -13,8 +13,10 @@ araiguma/
 │   ├── core/      domain model, provider abstraction, merge, snapshot diff
 │   ├── sysfs/     sysfs/procfs fallback provider (injectable roots)
 │   ├── netlink/   rtnetlink primary provider + multicast change monitor
+│   ├── engine/    shared observation engine, envelopes, subscriptions, resync
 │   └── cli/       `araiguma snapshot` / `araiguma watch`
 ├── apps/
+│   ├── desktop/   Tauri 2 native shell, IPC commands/events, lifecycle
 │   └── frontend/  Svelte 5 + TypeScript + Vite UI
 ├── fixtures/      synthetic, clearly-labeled test data (schema-locked)
 ├── scripts/       environment, bootstrap, validation, recovery tooling
@@ -40,14 +42,21 @@ araiguma/
                             │
         ┌───────────────────┼─────────────────────┐
         ▼                   ▼                     ▼
-  `araiguma snapshot`  `araiguma watch`     frontend (today:
-  (one JSON document)  (NDJSON: snapshot,   fixtures/mock; later:
-                        changed, resync)    loads CLI documents)
+  `araiguma snapshot`  `araiguma watch`     Tauri desktop
+  (one JSON document)  (NDJSON: snapshot,   (validated IPC snapshot,
+                        changed, resync)    topology, live events)
+                                │                    │
+                                └──── shared engine ─┘
+                                     (crates/engine)
+                                             │
+                                             ▼
+                                      frontend documents
+                              (explicit mock, imported, or live)
 ```
 
 The Rust model is authoritative. The frontend never discovers or reconstructs
-network state; it renders `NetworkSnapshot` documents (today: labeled
-synthetic fixtures; later: CLI output).
+network state; it renders validated `NetworkSnapshot` documents and their
+backend-projected topology.
 
 ## Domain model semantics (crates/core)
 
@@ -179,15 +188,20 @@ multicast groups (equivalent to `ip monitor`) via a dedicated netlink
 connection. Relevant notifications are classified (`newLink`, `newAddress`,
 `newRoute`, `delLink`, ...); ACKs and unrelated messages are filtered.
 
-If the connection dies, the monitor reconnects with exponential backoff
-(250 ms doubling to 8 s) and emits `Signal::Resynchronized`, which tells
-consumers that changes during the gap were **not observed** and state must be
-re-dumped. The same signal is emitted when the kernel reports a
-receive-buffer overrun (`ENOBUFS` → `NLMSG_OVERRUN`): dropped notifications
-are unobserved, and the stream never claims to be current. The watch CLI
-turns that into a `resynchronized` envelope with a full fresh snapshot;
-ordinary bursts are debounced (150 ms) and emitted as `changed` envelopes
-carrying pure snapshot diffs.
+If the connection dies, the monitor reports `Signal::Disconnected`
+immediately and reconnects with exponential backoff (250 ms doubling to 8 s).
+Each failed attempt reports `Signal::ReconnectFailed`; a successful attempt
+reports `Signal::Reconnected`. The desktop turns these transitions into the
+narrow `monitorHealth` IPC signal: degraded mode keeps the last confirmed
+observation visible as STALE (or UNAVAILABLE when none exists), and LIVE is
+restored only after a fresh observation and an explicit recovered signal.
+The CLI keeps its existing three-event contract and emits the same
+`resynchronized` envelope after recovery.
+
+A receive-buffer overrun (`ENOBUFS` → `NLMSG_OVERRUN`) reports
+`Signal::Resynchronized`: dropped notifications are unobserved, and the
+stream never claims to be current. Ordinary bursts are debounced (150 ms)
+and emitted as `changed` envelopes carrying pure snapshot diffs.
 
 ## Topology projection (crates/core::topology, WO-02)
 
@@ -227,7 +241,8 @@ frontend test suites.
 | Live cross-validation | the real binary against iproute2 JSON output in a netns, plus a watch smoke | `scripts/live-check.sh` |
 | Frontend unit | formatters, state semantics, fixture contract, parse validation | `apps/frontend/tests` (vitest) |
 | Browser | smoke, design verification (dark theme, 56px rail, ≥96% workspace, badge), panel-overlays-workspace | `apps/frontend/e2e` (Playwright, production build) |
-| Gate | all of the above + fmt/clippy + budget + identity audit | `scripts/test-all.sh` |
+| Native desktop | real Tauri window; LIVE/STALE, monitor disconnect/recovery, XDG paths, graceful close and SIGTERM/SIGINT shutdown; UNAVAILABLE frontend regression | `apps/desktop` plus workstation evidence |
+| Automated gate | workspace tests + frontend checks + fmt/clippy + budget + identity audit | `scripts/test-all.sh` |
 
 Network namespace tests create and destroy interfaces **only** inside
 `unshare -Urn` child processes; the host namespace is never modified. `ip`
@@ -239,7 +254,11 @@ itself never shells out.
 Svelte 5 (runes) + TypeScript + Vite. Dark charcoal design system, 56 px
 icon-led navigation rail, central workspace at ≥96% of viewport width, and a
 contextual details panel that overlays (never shrinks) the workspace. While
-synthetic data is displayed, a persistent `MOCK DATA` badge is visible.
+synthetic data is displayed, a persistent `MOCK DATA` badge is visible. In
+the native Tauri application, live documents occupy a separate store and
+are labeled LIVE, STALE, or UNAVAILABLE according to the event monitor's
+actual health; an explicit import or fixture selection remains the rendered
+view.
 
 The TypeScript model in `apps/frontend/src/types.ts` mirrors the Rust serde
 output. The sync contract: `fixtures/snapshots/*.json` are parsed by Rust
@@ -260,23 +279,24 @@ A small production test hook exists on the topology view only when the page
 is opened with the explicit `?araiguma-test-hooks` parameter (or in dev
 mode), and is removed when the view unmounts.
 
-## Future integration points (not built in WO-01R)
+## Remaining integration points
 
-- Tauri 2 desktop shell (blocked in this sandbox: no WebKitGTK, no root).
 - NetworkManager / systemd-resolved D-Bus providers (trait slots exist; the
-  sandbox has no system bus — a private-session harness capability check is
-  part of the gate).
-- Loading real observations in the frontend (same `NetworkSnapshot` JSON the
-  CLI emits).
+  current stage does not add these optional providers).
+- Typed IPC errors and the full Document-04 subscription lifecycle (UUID v4
+  IDs, idempotent cancellation, `Cancelled`, terminal `ended`, and
+  per-subscription channels) remain deferred. Stage 1 returns plain string
+  errors and a minimal subscription lifecycle.
+- Tray, notifications, and packaging remain outside WO-05 Stage 1.
 
-## Design trajectory (Prompt 03 specification — not yet implemented)
+## Design trajectory (Prompt 03 specification)
 
-The backend architecture and network data model that will govern the
+The backend architecture and network data model that govern the
 implementation stages are specified in
 [`docs/design/prompt-03/`](design/prompt-03/README.md) (approved decisions
 OD-01/02/03/08/09/10 of the accepted WO-02 feasibility assessment,
 translated into crate boundaries, a provider contract, evidence semantics, a
 schema-v4 document/IPC contract, logging/diagnostics design, read-only
-enforcement, and the test strategy). This document continues to describe the
-**current** implementation; where the two differ, the spec package is the
-target and nothing in it has been built yet.
+enforcement, and the test strategy). WO-05 Stage 1 implements the shared
+engine and Tauri shell portions; later optional providers, tray behavior,
+logging, and packaging remain separate work.

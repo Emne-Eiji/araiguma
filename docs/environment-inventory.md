@@ -58,6 +58,8 @@ layout; the generated `package-lock.json` is copied back and committed.
 | cargo / rustc shims | 1.100.0 | `../toolchains/cargo/bin` |
 | rustfmt / clippy | 1.11.0 / 0.1.100 | same |
 | svelte | 5.58.0 | committed lockfile |
+| cytoscape | 3.35.0 | committed lockfile |
+| @tauri-apps/api | 2.12.5 | committed lockfile |
 | vite | 8.3.8 | committed lockfile |
 | @sveltejs/vite-plugin-svelte | 7.3.1 | committed lockfile |
 | typescript | 5.9.3 | committed lockfile |
@@ -66,29 +68,26 @@ layout; the generated `package-lock.json` is copied back and committed.
 | @playwright/test | 1.65.1 | committed lockfile |
 
 Rust crate versions are exact-pinned in the workspace manifest and
-`Cargo.lock`; the set deliberately matches the crate archive cache that
-survived the incident, so a warm sandbox rebuilds offline.
+`Cargo.lock`. The earlier WO-01R/WO-03 dependency set matched the crate
+archive cache that survived the incident; the Tauri dependency tree added
+by WO-05 must be revalidated separately before claiming a fully offline
+warm-cache rebuild.
 
-## npm security advisory status (re-evaluated 2026-11-19)
+## npm security advisory status (re-evaluated 2026-11-22)
 
-- `npm audit` over **runtime** dependencies: **0 vulnerabilities** (the app
-  ships no runtime npm dependencies beyond svelte itself).
-- `npm audit --include=dev`: **7 high** — `picomatch` ReDoS
-  (GHSA-fc5q-39xc-vjpf, all published versions affected) reachable through
-  `fdir`/`tinyglobby` → `svelte-check`, `vite`, `vitest`,
-  `@sveltejs/vite-plugin-svelte`. No fixed release exists; the suggested
-  "fix" downgrades vite to 6.2.7 (breaking) and would not clear the
-  svelte-check chain.
-- Assessment: **development-tooling-only exposure**. These tools run on the
-  developer's own files in this sandbox; the production application
-  contains none of this code, and dev/preview servers bind to 127.0.0.1.
-  Accepted for the dev toolchain, re-evaluated at every milestone (the WO-02
-  closeout re-checks this assessment).
+- `npm audit` over the complete frontend dependency tree, including
+  development tooling: **0 vulnerabilities**.
+- Runtime dependencies are Svelte, Cytoscape, and the Tauri JavaScript API.
+  The remaining packages are build/test tooling.
+- The 2026-11-19 `picomatch` development-tooling advisory was resolved by
+  later pinned transitive releases; the current lockfile is clean.
 
 ## Build limitations in this environment
 
-- No WebKitGTK and no root ⇒ **Tauri desktop shell cannot run or build
-  here** (deferred; the frontend targets a browser in the meantime).
+- The earlier Debian sandbox had no WebKitGTK development packages, so the
+  Tauri shell was deferred there. On the current Pop!_OS workstation Emne
+  installed the four Tauri build prerequisites; the native WO-05 Stage 1
+  application has since been built and exercised successfully.
 - No systemd / NetworkManager / systemd-resolved ⇒ no real service
   integration testing (mocks and a private-session D-Bus capability check
   only). Nothing in this repository claims such testing.

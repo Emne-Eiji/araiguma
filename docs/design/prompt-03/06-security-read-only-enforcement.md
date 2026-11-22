@@ -202,11 +202,13 @@ which the audit demonstrates.
 ## 5. Tauri capabilities and command exposure (L2)
 
 - Deny-by-default (OD-01/OD-03): the capability set grants **only**
-  `core:default` (app/window/webview/event essentials for a local UI).
-  No `shell`, no `fs`, no `http`, no `clipboard`, no `global-shortcut`,
-  no `notification`, no `dialog` (file import uses the standard HTML
-  file input / drag-and-drop in the webview — no native-dialog plugin
-  needed).
+  `core:event:allow-listen` and `core:event:allow-unlisten`, the two
+  frontend permissions needed to consume the backend-owned live-event
+  channel. The frontend cannot emit on that channel, so it cannot spoof
+  backend-owned monitor-health facts. No `shell`, no `fs`, no `http`, no
+  `clipboard`, no `global-shortcut`, no `notification`, no `dialog` (file
+  import uses the standard HTML file input / drag-and-drop in the webview
+  — no native-dialog plugin needed).
 - Command surface: the four IPC commands of document 04 §9
   (`get_snapshot`, `get_topology`, `subscribe_watch`,
   `unsubscribe_watch`) and nothing else. Every command is registered
@@ -264,6 +266,6 @@ based in the spirit of the existing gate steps [REPO —
 | Restricted-proxy D-Bus design; per-operation allow-list (service/path/interface/member/operation) with named-`Get`-only property access; `GetAll` and `GetManagedObjects` excluded from v1.0.0 | Q-1; R-03; work order §3.3; Prompt 03-FC §5 (FC-02) | RD-25 |
 | Properties/signals-only posture for resolved; active query methods prohibited | work order §3.3/§3.4 | approved-derived |
 | `CheckConnectivity`/`RequestScan` prohibited despite observational names | work order §3.3 ("not safe merely because observational") | approved-derived |
-| Capability set = `core:default` only; no dialog/shell/fs plugins | OD-01/OD-03; WO-02 Table 5.1 | RD-26 |
+| Capability set = event listen/unlisten only; no event emit, dialog, shell, or fs plugins | OD-01/OD-03; WO-02 Table 5.1; WO-05 monitor-health trust boundary | RD-26 |
 | `scripts/check-readonly.sh` audit step (8 checks) | WO-02 Layer 4; work order §3.3 | RD-27 |
 | Before/after netns + host state-comparison invariant test | WO-02 Layer 3; OD-10 | approved-derived (design in document 07) |

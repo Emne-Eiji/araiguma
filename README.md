@@ -15,12 +15,12 @@ authoritative; every reported value is either an observation or an explicit
 "not observed".
 
 > **Status:** Stable baseline — WO-01R/WO-02/WO-03 foundation and validated;
-> WO-04 Stage A implements the six-section application shell (browser app
-> with CLI document import). The original WO-01 repository was lost to a
-> sandbox persistence incident on 2026-11-18 and was rebuilt under a fresh
-> history — see `docs/incident-2026-11-18-repository-loss.md`. Planned:
-> Tauri desktop shell, tray/notifications, engine orchestration, NetworkManager
-> and systemd-resolved providers (Approved designs: OD-01–OD-03),
+> WO-04 Stage A implements the six-section application shell; WO-05 Stage 1
+> adds the shared observation engine and the native Tauri 2 desktop shell.
+> The original WO-01 repository was lost to a sandbox persistence incident
+> on 2026-11-18 and was rebuilt under a fresh history — see
+> `docs/incident-2026-11-18-repository-loss.md`. Still planned: tray and
+> notifications, optional NetworkManager/systemd-resolved providers, and
 > packaging. See [Status and roadmap](#status-and-roadmap).
 
 ## Screenshots
@@ -59,14 +59,26 @@ provider abstraction with six-state health; merge layer; snapshot diffing.
 schema v3), `araiguma watch` (NDJSON events), `araiguma topology --input`
 (project a snapshot into an evidence-only topology document).
 
-**Frontend** (`apps/frontend`): Svelte 5 + TypeScript + Vite browser app with
+**Shared engine** (`crates/engine`): one observation engine owns providers,
+the current document, envelope sequencing, subscriptions, and resync
+semantics for both the CLI and the desktop. The consumer owns the change
+feed, so waiting for a netlink event never blocks IPC observation commands.
+
+**Desktop** (`apps/desktop`): Tauri 2 native shell with validated live IPC,
+retained file import, XDG configuration/state paths, truthful LIVE / STALE /
+UNAVAILABLE presentation, and a restrictive capability surface.
+
+**Frontend** (`apps/frontend`): Svelte 5 + TypeScript + Vite app with
 six sections — **Overview**, **Topology**, **Interfaces**,
 **Routes & Gateways** (main-table view with explicit table filter and full
 multipath hop lists in the details), **Providers & Observation Health**,
-and **Documents & Import**. The app loads either labeled synthetic fixtures
-(`MOCK DATA` badge) or imported observation documents (`IMPORTED OBSERVATION`
-badge — never presented as a live connection). The status bar states the data
-mode and observation/import times; it never invents timestamps.
+and **Documents & Import**. The app loads labeled synthetic fixtures
+(`MOCK DATA` badge), imported observation documents (`IMPORTED OBSERVATION`
+badge — never presented as a live connection), or, in the native desktop, a
+validated live engine pair (`LIVE`, `STALE`, or `UNAVAILABLE`). An explicit
+import or fixture selection remains the rendered view and is never silently
+replaced by a live update. The status bar states the data mode and
+observation/import times; it never invents timestamps.
 
 **Document import**: `araiguma snapshot`/`araiguma topology` output imports
 through a validating document boundary; provenance and limitations are
@@ -82,15 +94,18 @@ Linux network state
        v
 Observation providers -> Merge (netlink wins; sysfs fills gaps; sources unite)
        |
-       +-- NetworkSnapshot  (schema v3; topology projection, evidence-only)
+       v
+Shared observation engine (crates/engine)
+  current document + ordered envelopes + subscriptions
        |
        +-- CLI: snapshot [--pretty] / watch / topology --input
-       +-- Frontend (browser app): six sections; mock or imported documents
+       +-- Tauri desktop: validated live IPC + event stream
+       +-- Frontend: six sections; explicit mock, imported, or live documents
 ```
 
 The full architecture and merge rules are documented in
 [`docs/architecture.md`](docs/architecture.md); the diagram above shows the
-implementation as of 2026-11-21. See the diagram at
+implementation as of 2026-11-22. See the diagram at
 [`assets/architecture/observation-pipeline.svg`](assets/architecture/observation-pipeline.svg).
 
 ## Status and roadmap
@@ -101,16 +116,16 @@ implementation as of 2026-11-21. See the diagram at
 | rtnetlink provider | Implemented | full multipath; live-verified (live-check: 20/20 PASS) |
 | sysfs/procfs provider | Implemented | honest degradation; live-verified |
 | CLI (`araiguma snapshot/watch/topology`) | Implemented | verified live: real data returned on this machine |
-| Frontend shell (six sections) | Implemented | browser-exercised; no console errors observed |
-| Document import and validation | Implemented | vitest suite: 168 passed; live-doc import passes |
+| Frontend shell (six sections) | Implemented | browser- and native-desktop exercised; truthful live/import/mock modes |
+| Document import and validation | Implemented | shared Rust/TypeScript validation boundaries; live-doc import passes |
 | Synthetic scenarios (5) | Implemented | labeled mock data with provenance |
 | Evidence-only topology projection | Implemented | unknown stays unknown; no invented upstream nodes |
-| GUI end-to-end validation | Partially implemented | e2e suite exists (25 tests); Playwright Chromium build 1255 is missing on this workstation |
-| Tauri 2 desktop shell (OD-01) | Planned | not built; desktop cannot run on this workstation (no GTK/WebKitGTK dev) |
+| GUI end-to-end validation | Implemented | browser e2e suite passed historically (25 tests; not rerun with the current Playwright Chromium revision); manual native Tauri LIVE/STALE monitor recovery verified on this workstation |
+| Tauri 2 desktop shell (OD-01) | Implemented | native Tauri 2 window; live IPC/events, retained import, XDG paths, clean shutdown |
 | NetworkManager provider (OD-02) | Planned | optional, capability-probed; absent here |
 | systemd-resolved provider | Planned | optional, capability-probed |
 | Tray and notifications (WO-TRAY-01) | Planned | status vocabulary reserved (document 03 §11) |
-| `crates/engine` orchestration | Planned (RD-01) | not implemented; crate layout still to be opened |
+| `crates/engine` orchestration | Implemented | shared by CLI and desktop; ordered envelopes, subscriptions, resync, monitor health |
 | Structured logging/diagnostics | Partially implemented | basic stderr logging (`log` crate) exists; full design (document 05) is spec-only |
 | Packaging (.deb, etc.) | Planned | none present |
 
@@ -120,17 +135,20 @@ OD-10 (Ubuntu 24.04 checkpoint). Open for decision: OD-04/05/06/07.
 
 ## Desktop status
 
-Araiguma's **intended product is a Tauri 2 desktop application** (approved
-decision OD-01), but the current repository ships a **browser frontend** — a
-Svelte 5 + Vite SPA (`apps/frontend`) with the six sections above. The
-browser app is the current demonstrable interface; the desktop application
-is planned.
+Araiguma's product shell is the Tauri 2 application in `apps/desktop`. It
+uses the same Svelte frontend as the browser build, but detects the Tauri
+runtime and obtains validated snapshots, topology, and ordered live events
+through IPC. File import remains available in the native application.
 
-On this workstation the desktop could not be built or launched
-(no GTK/WebKitGTK dev packages; `cargo tauri` unavailable; no
-`apps/desktop`). The `vite preview` + browser exercise (Phase A) shows the
-browser app working. A desktop build requires the GTK development packages
-listed in [`docs/environment-inventory.md`](docs/environment-inventory.md).
+The native application has been built and manually exercised on this
+workstation. LIVE and STALE states, the disconnect → failed reconnect → recovery
+transition, XDG configuration/state paths, graceful shutdown through the window
+manager's `WM_DELETE_WINDOW` close request (verified with the window focused),
+and cooperative SIGTERM/SIGINT handling (both exit status 0) were verified
+against the real Tauri window. The UNAVAILABLE distinction is covered by the
+frontend regression suite.
+Packaging, tray, notifications, and optional service providers remain outside
+this stage.
 
 ## Development and testing
 
@@ -139,36 +157,44 @@ listed in [`docs/environment-inventory.md`](docs/environment-inventory.md).
 - Rust 1.100.0 (pinned via `rust-toolchain.toml`)
 - Node.js/npm (for the frontend)
 
-### Verified on this branch (2026-11-21, this workstation)
+### Verified on this branch (2026-11-22, this workstation)
 
 ```sh
-source scripts/env.sh          # sets RUSTUP_HOME/CARGO_HOME/PATH; cargo --version → 1.100.0 (works)
-cargo build --workspace        # PASS (all crates) — re-run today without env.sh: exit 0
-cargo test --workspace         # PASS: 144 unique Rust tests (0 failed) — re-run today without env.sh
-cargo fmt --all -- --check     # PASS (historical, executed during onboarding)
-cargo clippy --workspace --all-targets -- -D warnings  # PASS (historical, executed during onboarding)
+cargo build --workspace
+cargo test --workspace
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
-*Environment note: on this workstation the toolchain under the
-`scripts/env.sh`-pinned location (`../toolchains/rustup`) is currently
-incomplete for new `rustc` invocations (`rustc -vV` fails with "Missing
-manifest"). Commands that don't invoke rustc (`cargo --version`, cached
-builds) still work; the complete toolchain is at `~/.rustup`
-(1.100.0-x86_64-unknown-linux-gnu) — worth fixing on this machine.*
+The workspace gate includes the transient-network-namespace tests; all
+passed with zero failures.
 
-Frontend (from the ephemeral work copy `/tmp/araiguma-work/apps/frontend`):
+Frontend (from `apps/frontend`):
 
 ```sh
-npx --no-install vite build    # success: index 613.11 kB (gzip 185.28 kB); chunk-size warning only
-npx --no-install vitest run    # PASS: 11 files, 168 tests (includes live-document import) — historical, executed during onboarding
-npx --no-install svelte-check  # 0 errors, 0 warnings — historical, executed during onboarding
-npx --no-install vite preview  # http://127.0.0.1:5199/ (HTTP 200; exercised via in-app browser)
+npm run check                   # PASS: 0 errors, 0 warnings
+npm test                        # PASS: 12 files, 189 passed, 1 skipped
+npm run build                   # PASS: production frontend bundle
+npm audit                       # PASS: 0 vulnerabilities
+# Historical: npm run test:e2e passed 25 tests with temporary Chromium 1243
+# compatibility symlinks; it was not rerun for this verification block.
 ```
+
+The Playwright result is historical. Playwright 1.65.1 expects Chromium
+revision 1255, which is not cached on this workstation; the earlier 25/25
+run used temporary revision-compatibility symlinks and was not repeated for
+this verification block.
 
 Live read-only observation (transient netns):
 
 ```sh
-./scripts/live-check.sh        # PASS: 20/20 (interfaces, routes, multipath, watch, iproute2 cross-validation) — executed during onboarding; currently fails on this workstation (see environment note)
+# On this workstation the complete Rust toolchain is ~/.rustup; the sibling
+# toolchains/rustup selected by scripts/env.sh is incomplete. The explicit
+# environment below keeps the script reproducible without system changes.
+RUSTUP_HOME="$HOME/.rustup" \
+ARIGUMA_CARGO_HOME="$HOME/.cargo" \
+ARIGUMA_TOOLCHAINS="$HOME/.cargo" \
+./scripts/live-check.sh        # PASS: 20/20 (interfaces, routes, multipath, watch, iproute2 cross-validation)
 ```
 
 Full validation gate (canonical for fresh-clone validation):
@@ -177,11 +203,18 @@ Full validation gate (canonical for fresh-clone validation):
 ./scripts/test-all.sh          # see docs/development.md; runs the complete documented workflow
 ```
 
-End-to-end GUI validation (see limitations above):
+End-to-end GUI validation:
 
 ```sh
-cd apps/frontend && npm run test:e2e   # 25 tests; requires Playwright Chromium 1255 (not installed here)
-npx --no-install playwright install chromium   # optional: install the browser to run e2e locally (downloads ~100 MB to ~/.cache/ms-playwright)
+cd apps/frontend && npm run test:e2e   # 25 tests; historical result — see the Playwright note above
+npx --no-install playwright install chromium   # install the browser if it is not cached locally
+```
+
+Native desktop verification uses the production-style embedded frontend:
+
+```sh
+npm --prefix apps/frontend run build
+cargo build --release -p araiguma-desktop --features custom-protocol
 ```
 
 ## Project documentation
@@ -202,11 +235,12 @@ treat the inventory as historical.*
 ## Governance
 
 - Product owner: **Emne** — sole authority over direction, scope, acceptance.
-- Publication: the complete verified history is published on the
-  **`recovery/araiguma-main`** branch of the GitHub remote `origin`
-  (`https://github.com/Emne-Eiji/araiguma.git`). GitHub's default `main`
-  branch is a separate, unrelated 2-commit history and is not merged.
-  Publication is a recovery measure, not a release.
+- Publication: the complete verified history is published on the GitHub
+  remote `origin` (`https://github.com/Emne-Eiji/araiguma.git`), with
+  `main` as the canonical branch and **`recovery/araiguma-main`** retained
+  as the recovery branch. The pre-recovery two-commit history is preserved
+  on `archive/main-pre-recovery-2026-11-21`. Publication is a recovery
+  measure, not a release.
 
 ## Contributing
 

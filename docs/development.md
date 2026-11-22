@@ -43,6 +43,7 @@ COMPLETE documented workflow, not just a subset of the tests.
 |---|---|
 | Format / lint / test Rust | `cargo fmt --all` · `cargo clippy --workspace --all-targets -- -D warnings` · `cargo test --workspace` |
 | Build the CLI | `cargo build -p araiguma-cli` (`$CARGO_TARGET_DIR/debug/araiguma`) |
+| Build the native desktop | `npm --prefix apps/frontend run build` then `cargo build --release -p araiguma-desktop --features custom-protocol` |
 | Observe | `araiguma snapshot [--pretty]` · `araiguma watch` |
 | Frontend type check | `scripts/frontend.sh check` |
 | Frontend unit tests | `scripts/frontend.sh test` |
@@ -51,6 +52,10 @@ COMPLETE documented workflow, not just a subset of the tests.
 | Live cross-validation | `scripts/live-check.sh` |
 | Everything | `scripts/test-all.sh` |
 | Storage report | `scripts/disk-usage.sh` / `scripts/check-durable-size.sh` |
+
+The desktop's `custom-protocol` feature embeds the production frontend
+bundle. Without that feature a native binary uses Tauri's development URL and
+shows a connection-refused page instead of the application.
 
 Frontend tooling runs in an ephemeral work copy (`/tmp/araiguma-work` by
 default; `ARIGUMA_FRONTEND_WORK` moves it, as the fresh-clone validation
@@ -104,11 +109,13 @@ drift).
 
 ## Git workflow
 
-- Current development branch: **`recovery/araiguma-main`** — local only,
-  tracking **`origin/recovery/araiguma-main`** on the GitHub remote `origin`
-  (`https://github.com/Emne-Eiji/araiguma.git`). GitHub's default `main`
-  branch is separate and unrelated — never merged into the project history
-  [REPO][HIST]. No local `main` development branch exists.
+- Current development branch: **`recovery/araiguma-main`**, tracking
+  **`origin/recovery/araiguma-main`** on the GitHub remote `origin`
+  (`https://github.com/Emne-Eiji/araiguma.git`). GitHub `main` is the
+  canonical published history and points at the same recovered commit; the
+  pre-recovery two-commit history is preserved on
+  `archive/main-pre-recovery-2026-11-21` [REPO][HIST]. No local `main`
+  development branch exists.
 - Repository-local identity only:
 
   ```sh
@@ -132,7 +139,12 @@ size check is part of the gate.
 ## Troubleshooting
 
 - **`cargo` not found / wrong toolchain**: `source scripts/env.sh` sets
-  RUSTUP_HOME/CARGO_HOME/PATH; the toolchain lives in `../toolchains`.
+  RUSTUP_HOME/CARGO_HOME/PATH; the intended toolchain lives in
+  `../toolchains`. On this workstation that sibling toolchain is incomplete;
+  use the complete `~/.rustup` toolchain by exporting
+  `RUSTUP_HOME="$HOME/.rustup"` and `ARIGUMA_CARGO_HOME="$HOME/.cargo"`
+  (and `ARIGUMA_TOOLCHAINS="$HOME/.cargo"` for scripts that source
+  `scripts/env.sh`).
 - **Frontend tests can't find fixtures**: they import
   `../../../../fixtures/...`; run them via `scripts/frontend.sh` (the work
   copy preserves the layout).

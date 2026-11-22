@@ -188,14 +188,27 @@ sequence number (continuity, §8):
 {"event":"snapshot",      "seq":41, "snapshot":{…document…}}
 {"event":"changed",       "seq":42, "notifiedBy":["newLink","newRoute"], "changes":[…diff events…]}
 {"event":"resynchronized","seq":43, "changes":[…], "snapshot":{…full fresh document…}}
+{"event":"monitorHealth", "seq":44, "monitor":{"state":"degraded","reason":"…"}}
+{"event":"monitorHealth", "seq":45, "monitor":{"state":"recovered"}}
 ```
 
 - Semantics are unchanged from the CLI contract [REPO]: `snapshot` is
   the initial state; `changed` is a debounced pure diff; `resynchronized`
   means a monitoring gap occurred — changes during the gap were **not
   observed** and the fresh snapshot is authoritative again.
+- `monitorHealth` is the narrowly scoped desktop IPC control signal for
+  event-monitor reliability. `degraded` means the event stream is no
+  longer reliable (a disconnect or failed reconnect attempt); `recovered`
+  means the subscription was re-established **and** a fresh observation
+  was constructed. It is not a general provider-health subsystem and it
+  carries no network facts.
+- `monitorHealth` is not a CLI watch event. The CLI continues to expose
+  exactly `snapshot`, `changed`, and `resynchronized`; it waits through a
+  disconnect/reconnect and emits the same `resynchronized` document event
+  as before.
 - `seq` is a u64, monotonic per engine session, gap-free in-order
-  delivery within a session (envelopes are delivered in seq order).
+  delivery within a session (envelopes are delivered in seq order). The
+  health signal consumes a sequence number on that same global stream.
 - `changes` items are the existing typed diff events [REPO —
   `NetworkEvent`], extended additively for v4 entities (rules, DNS)
   under the same identity discipline.
@@ -216,6 +229,19 @@ sequence number (continuity, §8):
    resync envelope.
 4. **No lossy compaction**: `changed` envelopes are pure diffs of full
    documents; consumers may always re-derive from a snapshot.
+5. **Disconnect is immediately visible**: when the event monitor loses its
+   multicast stream, the engine publishes `monitorHealth` with state
+   `degraded` before attempting a reconnect. A confirmed observation
+   remains visible but is STALE; with no confirmed observation the live
+   state is UNAVAILABLE. The UI must not report LIVE in this interval.
+6. **Failed reconnects remain degraded**: every failed reconnect attempt
+   may publish another `degraded` health signal with its reason. It never
+   restores LIVE and never discards the last confirmed observation.
+7. **Recovery is observation-first**: after the subscription is
+   re-established, the engine constructs a fresh authoritative snapshot,
+   publishes the `resynchronized` document event, and only then publishes
+   `monitorHealth` with state `recovered`. LIVE may be restored only after
+   that recovered signal and a coherent rendered document pair.
 
 ## 9. IPC surface (OD-03; candidate names from WO-02 §2.3, refined)
 
@@ -245,7 +271,10 @@ subscriptions per frontend are permitted and independent.
 
 **Active delivery.** Document-event envelopes (§7) flow to the
 subscription as IPC events (channel `araiguma://watch`, named by
-subscriptionId), in seq order until termination.
+subscriptionId), in seq order until termination. The WO-05 Stage 1 desktop
+transport uses the single process-wide channel `araiguma/event` for both
+document events and the narrowly scoped `monitorHealth` control signal;
+the health signal uses the same global `seq` stream.
 
 **Cancellation.** `unsubscribe_watch { subscriptionId }`:
 
@@ -340,6 +369,7 @@ library-crate rules (document 07 §8).
 | v4 envelope: additive `meta` (identity/producer/synthetic/collection) | work order §3.6; v2/v3 additive precedent [REPO] | RD-15 |
 | Import time recorded by importer in session state, never in the document | work order §3.6 (separate concepts); artifact immutability | RD-17 |
 | Envelope `seq` + snapshot-first gap recovery | work order §3.7; R-10 | RD-18 |
+| Narrow `monitorHealth` IPC signal: degraded on disconnect/failed reconnect; recovered only after fresh observation | WO-05 Stage 1 amendment authorized by Emne (2026-11-22) | approved-derived (binding) |
 | `get_topology` also projects caller-supplied snapshots (backend stays projection authority) | work order §3.7; existing projection authority [REPO] | RD-19 |
 | Typed 3-code IPC error model; observation failures live in documents | work order §3.7; existing principle [REPO] | approved-derived |
 | Binary transports rejected for v1.0.0 | WO-02 §2.3 sizing | RD-16 |

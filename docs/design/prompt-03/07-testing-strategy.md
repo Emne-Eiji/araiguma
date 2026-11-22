@@ -152,6 +152,13 @@ A shared conformance harness any provider implementation must pass
   test consumer's state machine).
 - Debounce: bursts collapse into one `changed` envelope (existing
   behavior [REPO], preserved through the engine).
+- Monitor health (WO-05 Stage 1 amendment): disconnect, failed reconnect,
+  successful reconnect, and recovery are exercised independently. A
+  disconnect/failed attempt publishes `monitorHealth: degraded`; recovery
+  publishes a fresh `resynchronized` snapshot before
+  `monitorHealth: recovered`. The frontend preserves the last confirmed
+  pair as STALE (or reports UNAVAILABLE when none exists) and restores LIVE
+  only after the recovered signal.
 
 ## 8. Read-only invariant tests (before/after state comparison)
 

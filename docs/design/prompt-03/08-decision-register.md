@@ -56,7 +56,7 @@ review exactly as OD-04..OD-07 do (work order §2, binding).
 | RD-23 | Append-only session registry with unclean-crash detection | 05 §6 | crash forensics without new infrastructure |
 | RD-24 | Diagnostics export: field allowlist + per-category privacy policy (§9.1); full MAC redaction default (partial disclosure only by explicit user opt-in — Prompt 03-FC FC-03); pattern pass over free-form strings; self-describing manifest | 05 §9 | structural privacy; user-initiated only |
 | RD-25 | Restricted-proxy D-Bus design with the per-operation (service/path/interface/member/operation) allow-list; named-`Get`-only property access; `GetAll`/`GetManagedObjects` excluded from v1.0.0 (Prompt 03-FC FC-02) | 06 §4 | Q-1 resolved; R-03 mitigated structurally |
-| RD-26 | Tauri capability set = `core:default` only; no dialog/shell/fs plugins | 06 §5 | deny-by-default made reviewable |
+| RD-26 | Tauri capability set = `core:event:allow-listen` and `core:event:allow-unlisten` only; no event emit, dialog, shell, fs, or http permissions | 06 §5 | deny-by-default made reviewable; the frontend cannot spoof backend-owned monitor-health facts |
 | RD-27 | `scripts/check-readonly.sh`: eight mechanical audits in the gate | 06 §6 | WO-02 Layer 4 mechanized |
 | RD-28 | Shared provider conformance suite (mock sources injected) | 07 §4 | every provider provably honors the same contract |
 | RD-29 | Mock D-Bus services offer prohibited members; proxies proven not to call them | 07 §4 | the R-03 backstop, executable in Track 1 |
