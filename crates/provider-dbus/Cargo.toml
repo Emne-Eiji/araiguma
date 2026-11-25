@@ -1,0 +1,15 @@
+[package]
+name = "araiguma-provider-dbus"
+description = "Constrained read-only D-Bus transport foundation for Araiguma's optional providers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+zbus = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
