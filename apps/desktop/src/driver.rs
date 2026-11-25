@@ -12,9 +12,11 @@
 //! created.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use araiguma_engine::{
     debounce, default_change_feed, ChangeFeed, Engine, Envelope, MonitorHealthState,
+    OPTIONAL_POLL_INTERVAL,
 };
 use araiguma_netlink::Signal;
 use tauri::{Emitter, WebviewWindow};
@@ -51,9 +53,19 @@ pub async fn drive(state: AppState) {
     }
 }
 
-async fn drive_with_feed<F: ChangeFeed>(state: AppState, mut feed: F) -> Result<(), String> {
+async fn drive_with_feed<F: ChangeFeed>(state: AppState, feed: F) -> Result<(), String> {
+    drive_with_feed_and_optional_interval(state, feed, OPTIONAL_POLL_INTERVAL).await
+}
+
+async fn drive_with_feed_and_optional_interval<F: ChangeFeed>(
+    state: AppState,
+    mut feed: F,
+    optional_interval: Duration,
+) -> Result<(), String> {
     // Seed the engine before the first event can arrive. This establishes
-    // the baseline against which the first change diff is computed.
+    // the baseline against which the first change diff is computed. The
+    // opening document is baseline-only; optional providers remain
+    // NotYetObserved until the optional refresh loop runs.
     {
         let mut engine = state.engine.lock().await;
         let _ = engine.snapshot_document().await;
@@ -62,10 +74,26 @@ async fn drive_with_feed<F: ChangeFeed>(state: AppState, mut feed: F) -> Result<
 
     let mut shutdown = state.shutdown_receiver();
     let mut stop = std::pin::pin!(wait_for_shutdown(&mut shutdown));
+    let mut optional_timer = tokio::time::interval_at(
+        tokio::time::Instant::now() + optional_interval,
+        optional_interval,
+    );
+    optional_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let outcome = loop {
         let signal = tokio::select! {
             _ = &mut stop => break Ok(()),
             signal = feed.next_signal() => signal,
+            _ = optional_timer.tick() => {
+                let envelope = {
+                    let mut engine = state.engine.lock().await;
+                    engine.refresh_optional().await
+                };
+                if let Some(envelope) = envelope {
+                    let mut engine = state.engine.lock().await;
+                    engine.broadcast(&envelope);
+                }
+                continue;
+            }
         };
         let Some(signal) = signal else {
             break Err("the network change feed ended".to_string());
@@ -190,9 +218,14 @@ pub fn pump(
 mod tests {
     use super::*;
     use crate::paths::XdgPaths;
-    use araiguma_engine::{EnvelopeKind, FakeFeed};
+    use araiguma_core::model::{DnsObservation, DnsScope, ObservationSource};
+    use araiguma_core::provider::{
+        DiscoveryProvider, ProviderId, ProviderObservation, SectionResult,
+    };
+    use araiguma_engine::{Engine, EnvelopeKind, FakeFeed};
     use araiguma_netlink::Signal;
     use std::path::PathBuf;
+    use std::time::Duration;
 
     struct WaitingFeed;
 
@@ -315,5 +348,122 @@ mod tests {
             .expect("driver stopped")
             .expect("driver task completed")
             .expect_err("feed end reported");
+    }
+
+    struct BaselineProvider;
+
+    #[async_trait::async_trait]
+    impl DiscoveryProvider for BaselineProvider {
+        fn id(&self) -> ProviderId {
+            ProviderId::Netlink
+        }
+
+        fn priority(&self) -> u8 {
+            0
+        }
+
+        async fn observe(&mut self) -> ProviderObservation {
+            ProviderObservation {
+                provider: ProviderId::Netlink,
+                priority: 0,
+                interfaces: SectionResult::Observed(Vec::new()),
+                addresses_v4: SectionResult::Observed(Vec::new()),
+                addresses_v6: SectionResult::Observed(Vec::new()),
+                routes_v4: SectionResult::Observed(Vec::new()),
+                routes_v6: SectionResult::Observed(Vec::new()),
+                dns: SectionResult::Unsupported,
+                connections: SectionResult::Unsupported,
+                fidelity_limited: false,
+                notes: Vec::new(),
+            }
+        }
+    }
+
+    struct OptionalDnsProvider;
+
+    #[async_trait::async_trait]
+    impl DiscoveryProvider for OptionalDnsProvider {
+        fn id(&self) -> ProviderId {
+            ProviderId::SystemdResolved
+        }
+
+        fn priority(&self) -> u8 {
+            3
+        }
+
+        async fn observe(&mut self) -> ProviderObservation {
+            ProviderObservation {
+                provider: ProviderId::SystemdResolved,
+                priority: 3,
+                interfaces: SectionResult::Unsupported,
+                addresses_v4: SectionResult::Unsupported,
+                addresses_v6: SectionResult::Unsupported,
+                routes_v4: SectionResult::Unsupported,
+                routes_v6: SectionResult::Unsupported,
+                dns: SectionResult::Observed(vec![DnsObservation {
+                    scope: DnsScope::Global,
+                    mode: None,
+                    servers: Vec::new(),
+                    search_domains: Vec::new(),
+                    routing_domains: Vec::new(),
+                    sources: vec![ObservationSource::SystemdResolved],
+                    notes: Vec::new(),
+                }]),
+                connections: SectionResult::Unsupported,
+                fidelity_limited: false,
+                notes: Vec::new(),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn optional_refresh_reaches_subscribers_without_restart() {
+        let engine = Engine::new(vec![
+            Box::new(BaselineProvider),
+            Box::new(OptionalDnsProvider),
+        ]);
+        let state = AppState::with_engine(
+            XdgPaths {
+                config_dir: PathBuf::from("/tmp/config/araiguma"),
+                state_dir: PathBuf::from("/tmp/state/araiguma"),
+            },
+            engine,
+        );
+        let (_id, mut events) = state
+            .engine
+            .lock()
+            .await
+            .subscribe_and_snapshot()
+            .await
+            .expect("subscribe");
+        let task = tokio::spawn(drive_with_feed_and_optional_interval(
+            state.clone(),
+            WaitingFeed,
+            Duration::from_millis(10),
+        ));
+
+        let opening = tokio::time::timeout(Duration::from_secs(1), events.recv())
+            .await
+            .expect("opening snapshot")
+            .expect("opening envelope");
+        assert_eq!(opening.event, EnvelopeKind::Snapshot);
+        assert!(opening.snapshot.as_ref().unwrap().dns.is_none());
+
+        let changed = tokio::time::timeout(Duration::from_secs(1), events.recv())
+            .await
+            .expect("optional refresh event")
+            .expect("changed envelope");
+        assert_eq!(changed.event, EnvelopeKind::Changed);
+        assert_eq!(
+            changed.notified_by.as_deref(),
+            Some(["optionalRefresh".to_string()].as_slice())
+        );
+
+        state.request_shutdown();
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("driver stopped")
+            .expect("driver task completed")
+            .expect("driver stopped cleanly");
     }
 }

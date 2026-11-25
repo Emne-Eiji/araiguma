@@ -59,10 +59,15 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(paths: XdgPaths) -> Self {
+        Self::with_engine(paths, Engine::default_providers())
+    }
+
+    /// Construct state with an explicit engine (tests and embedders).
+    pub(crate) fn with_engine(paths: XdgPaths, engine: Engine) -> Self {
         let (shutdown, _receiver) = watch::channel(false);
         let (monitoring, _receiver) = watch::channel(MonitoringStatus::Starting);
         AppState {
-            engine: Arc::new(Mutex::new(Engine::default_providers())),
+            engine: Arc::new(Mutex::new(engine)),
             paths,
             shutdown,
             shutting_down: Arc::new(AtomicBool::new(false)),

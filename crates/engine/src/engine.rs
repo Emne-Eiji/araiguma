@@ -18,15 +18,24 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use serde::{Deserialize, Serialize};
 
-use araiguma_core::provider::DiscoveryProvider;
+use araiguma_core::provider::{DiscoveryProvider, ProviderId, ProviderObservation, SectionResult};
 use araiguma_core::snapshot::NetworkEvent;
 use araiguma_core::{diff_snapshots, merge, NetworkSnapshot};
 use araiguma_netlink::NetlinkProvider;
+use araiguma_provider_nm::NetworkManagerProvider;
+use araiguma_provider_resolved::SystemdResolvedProvider;
 use araiguma_sysfs::SysFsProvider;
 
 /// Burst-collapse window — identical to the CLI watch loop window
 /// (document 01 §4.1).
 pub const DEBOUNCE: Duration = Duration::from_millis(150);
+
+/// Default optional-provider polling cadence (RD-08: 30 s, configurable).
+///
+/// Optional providers are never observed during the opening snapshot. The
+/// CLI watch loop and desktop driver poll them on this cadence after the
+/// baseline document is available.
+pub const OPTIONAL_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -190,9 +199,67 @@ impl Envelope {
     }
 }
 
+/// A deterministic provider registry.
+///
+/// Registration is side-effect-free: no provider is constructed or observed
+/// here. Duplicate provider identities are rejected. Providers are ordered
+/// by `(priority, identity)` so observation and report order are stable.
+pub struct ProviderRegistry {
+    providers: Vec<(ProviderId, Box<dyn DiscoveryProvider>)>,
+}
+
+impl ProviderRegistry {
+    pub fn new() -> Self {
+        Self {
+            providers: Vec::new(),
+        }
+    }
+
+    /// Register one provider. The provider's own `id()` is the identity.
+    pub fn register(&mut self, provider: Box<dyn DiscoveryProvider>) -> Result<(), String> {
+        let id = provider.id();
+        if self.providers.iter().any(|(existing, _)| *existing == id) {
+            return Err(format!(
+                "duplicateProvider: provider identity {id:?} is already registered"
+            ));
+        }
+        self.providers.push((id, provider));
+        Ok(())
+    }
+
+    /// Provider identities in deterministic order.
+    pub fn ids(&self) -> Vec<ProviderId> {
+        let mut ids: Vec<ProviderId> = self.providers.iter().map(|(id, _)| id.clone()).collect();
+        ids.sort();
+        ids
+    }
+
+    fn into_providers(mut self) -> Vec<Box<dyn DiscoveryProvider>> {
+        self.providers
+            .sort_by(|(left_id, left), (right_id, right)| {
+                left.priority()
+                    .cmp(&right.priority())
+                    .then_with(|| left_id.cmp(right_id))
+            });
+        self.providers
+            .into_iter()
+            .map(|(_, provider)| provider)
+            .collect()
+    }
+}
+
+impl Default for ProviderRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// The shared observation engine.
 pub struct Engine {
     providers: Vec<Box<dyn DiscoveryProvider>>,
+    optional_indices: Vec<usize>,
+    last_optional: Vec<Option<ProviderObservation>>,
+    baseline_observations: Vec<ProviderObservation>,
     document: Option<NetworkSnapshot>,
     seq: u64,
     subscriptions: Vec<(String, UnboundedSender<Envelope>)>,
@@ -202,8 +269,17 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(providers: Vec<Box<dyn DiscoveryProvider>>) -> Engine {
+        let optional_indices = providers
+            .iter()
+            .enumerate()
+            .filter_map(|(index, provider)| is_optional(provider.id()).then_some(index))
+            .collect();
+        let last_optional = vec![None; providers.len()];
         Engine {
             providers,
+            optional_indices,
+            last_optional,
+            baseline_observations: Vec::new(),
             document: None,
             seq: 0,
             subscriptions: Vec::new(),
@@ -212,31 +288,134 @@ impl Engine {
         }
     }
 
-    /// The default provider set: netlink first (the authoritative source),
-    /// sysfs second (gap filling). The merge layer orders by priority
-    /// regardless of observation order.
-    pub fn default_providers() -> Engine {
-        Engine::new(vec![
-            Box::new(NetlinkProvider::new()),
-            Box::new(SysFsProvider::new()),
-        ])
+    /// Build an engine from a registry, rejecting duplicate identities.
+    pub fn with_registry(registry: ProviderRegistry) -> Result<Engine, String> {
+        Ok(Engine::new(registry.into_providers()))
     }
 
-    /// Run one observation pass and merge (never panics: provider failures
-    /// surface as failed sections in the returned snapshot).
+    /// The default provider set: baseline netlink/sysfs plus the optional
+    /// NetworkManager and systemd-resolved providers. Construction performs
+    /// no D-Bus I/O; optional providers are first observed only by the
+    /// optional refresh loop.
+    pub fn default_providers() -> Engine {
+        let mut registry = ProviderRegistry::new();
+        registry
+            .register(Box::new(NetlinkProvider::new()))
+            .expect("default netlink registration");
+        registry
+            .register(Box::new(SysFsProvider::new()))
+            .expect("default sysfs registration");
+        registry
+            .register(Box::new(NetworkManagerProvider::new()))
+            .expect("default NetworkManager registration");
+        registry
+            .register(Box::new(SystemdResolvedProvider::new()))
+            .expect("default resolved registration");
+        Engine::with_registry(registry).expect("default registry has unique identities")
+    }
+
+    /// Provider identities in deterministic order.
+    pub fn provider_ids(&self) -> Vec<ProviderId> {
+        self.providers
+            .iter()
+            .map(|provider| provider.id())
+            .collect()
+    }
+
+    /// Run one full observation pass, including optional providers.
+    ///
+    /// This is an explicit full refresh. Normal snapshot/change/resync paths
+    /// use the baseline plus the latest optional observations so optional
+    /// providers never block baseline observation.
     pub async fn observe_now(&mut self) -> NetworkSnapshot {
         let mut observations = Vec::new();
-        for provider in &mut self.providers {
-            observations.push(provider.observe().await);
+        let mut baseline = Vec::new();
+        for (index, provider) in self.providers.iter_mut().enumerate() {
+            let observation = provider.observe().await;
+            if self.optional_indices.contains(&index) {
+                self.last_optional[index] = Some(observation.clone());
+            } else {
+                baseline.push(observation.clone());
+            }
+            observations.push(observation);
+        }
+        self.baseline_observations = baseline;
+        merge(observations, now_ms())
+    }
+
+    /// Observe the baseline providers and merge them with the latest optional
+    /// observations (or stable `NotYetObserved` placeholders).
+    pub async fn observe_baseline_now(&mut self) -> NetworkSnapshot {
+        let mut observations = Vec::new();
+        let mut baseline = Vec::new();
+        for (index, provider) in self.providers.iter_mut().enumerate() {
+            if self.optional_indices.contains(&index) {
+                observations.push(
+                    self.last_optional[index]
+                        .clone()
+                        .unwrap_or_else(|| not_yet_observed(provider.as_ref())),
+                );
+            } else {
+                let observation = provider.observe().await;
+                baseline.push(observation.clone());
+                observations.push(observation);
+            }
+        }
+        self.baseline_observations = baseline;
+        merge(observations, now_ms())
+    }
+
+    /// Refresh only the optional providers and merge the result with the
+    /// stored baseline observations. Returns a `changed` envelope when the
+    /// document changed, or `None` when it did not.
+    pub async fn refresh_optional(&mut self) -> Option<Envelope> {
+        if self.stopped {
+            return None;
+        }
+        let optional_indices = self.optional_indices.clone();
+        for index in optional_indices {
+            let observation = self.providers[index].observe().await;
+            self.last_optional[index] = Some(observation);
+        }
+
+        let fresh = self.merge_with_optional();
+        if self.document.is_none() {
+            self.document = Some(fresh.clone());
+            let seq = self.next_seq();
+            return Some(Envelope::snapshot(seq, fresh));
+        }
+
+        let changes = self.diff_to(&fresh);
+        self.document = Some(fresh);
+        if changes.is_empty() {
+            None
+        } else {
+            let seq = self.next_seq();
+            Some(Envelope::changed(
+                seq,
+                vec!["optionalRefresh".to_string()],
+                changes,
+            ))
+        }
+    }
+
+    fn merge_with_optional(&self) -> NetworkSnapshot {
+        let mut observations = self.baseline_observations.clone();
+        for index in &self.optional_indices {
+            observations.push(
+                self.last_optional[*index]
+                    .clone()
+                    .unwrap_or_else(|| not_yet_observed(self.providers[*index].as_ref())),
+            );
         }
         merge(observations, now_ms())
     }
 
-    /// The current validated document; seeds via [`Engine::observe_now`]
-    /// on the first call.
+    /// The current validated document; seeds with a baseline-only
+    /// observation so optional providers never delay the opening snapshot.
     pub async fn snapshot_document(&mut self) -> Result<NetworkSnapshot, String> {
         if self.document.is_none() {
-            let document = self.observe_now().await;
+            let document = self.observe_baseline_now().await;
             self.document = Some(document.clone());
         }
         Ok(self
@@ -276,7 +455,7 @@ impl Engine {
     /// Observe now and return a `changed` envelope: a debounced pure diff
     /// against the current document (document 04 §7).
     pub async fn apply_change(&mut self, notified_by: Vec<String>) -> Envelope {
-        let fresh = self.observe_now().await;
+        let fresh = self.observe_baseline_now().await;
         let changes = self.diff_to(&fresh);
         self.document = Some(fresh.clone());
         let seq = self.next_seq();
@@ -287,7 +466,7 @@ impl Engine {
     /// occurred, changes during the gap were NOT observed, and the fresh
     /// snapshot is authoritative again (document 04 §8.3).
     pub async fn apply_resync(&mut self) -> Envelope {
-        let fresh = self.observe_now().await;
+        let fresh = self.observe_baseline_now().await;
         let changes = self.diff_to(&fresh);
         self.document = Some(fresh.clone());
         let seq = self.next_seq();
@@ -394,6 +573,26 @@ impl Engine {
     }
 }
 
+fn is_optional(id: ProviderId) -> bool {
+    matches!(id, ProviderId::NetworkManager | ProviderId::SystemdResolved)
+}
+
+fn not_yet_observed(provider: &dyn DiscoveryProvider) -> ProviderObservation {
+    ProviderObservation {
+        provider: provider.id(),
+        priority: provider.priority(),
+        interfaces: SectionResult::NotObserved,
+        addresses_v4: SectionResult::NotObserved,
+        addresses_v6: SectionResult::NotObserved,
+        routes_v4: SectionResult::NotObserved,
+        routes_v6: SectionResult::NotObserved,
+        dns: SectionResult::NotObserved,
+        connections: SectionResult::NotObserved,
+        fidelity_limited: false,
+        notes: Vec::new(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests (engine unit tests, document 07 §3 and §6).
 // ---------------------------------------------------------------------------
@@ -402,13 +601,19 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::change_feed::{debounce, ChangeFeed, FakeFeed};
-    use araiguma_core::provider::{ProviderId, ProviderObservation, SectionResult};
+    use araiguma_core::model::{DnsObservation, DnsScope, ObservationSource};
+    use araiguma_core::provider::{
+        ProviderId, ProviderObservation, ProviderState, SectionOutcome, SectionResult,
+    };
     use araiguma_netlink::Signal;
-    use std::sync::Arc;
+    use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use tokio::sync::Notify;
 
     fn empty_observation(provider: ProviderId) -> ProviderObservation {
         ProviderObservation {
-            provider,
+            provider: provider.clone(),
             priority: if provider == ProviderId::Netlink {
                 0
             } else {
@@ -419,9 +624,125 @@ mod tests {
             addresses_v6: SectionResult::Observed(Vec::new()),
             routes_v4: SectionResult::Observed(Vec::new()),
             routes_v6: SectionResult::Observed(Vec::new()),
+            dns: SectionResult::Unsupported,
+            connections: SectionResult::Unsupported,
             fidelity_limited: false,
             notes: Vec::new(),
         }
+    }
+
+    fn dns_observation(
+        provider: ProviderId,
+        priority: u8,
+        result: SectionResult<DnsObservation>,
+        fidelity_limited: bool,
+    ) -> ProviderObservation {
+        ProviderObservation {
+            provider,
+            priority,
+            interfaces: SectionResult::Unsupported,
+            addresses_v4: SectionResult::Unsupported,
+            addresses_v6: SectionResult::Unsupported,
+            routes_v4: SectionResult::Unsupported,
+            routes_v6: SectionResult::Unsupported,
+            dns: result,
+            connections: SectionResult::Unsupported,
+            fidelity_limited,
+            notes: Vec::new(),
+        }
+    }
+
+    fn empty_dns() -> DnsObservation {
+        DnsObservation {
+            scope: DnsScope::Global,
+            mode: None,
+            servers: Vec::new(),
+            search_domains: Vec::new(),
+            routing_domains: Vec::new(),
+            sources: vec![ObservationSource::SystemdResolved],
+            notes: Vec::new(),
+        }
+    }
+
+    struct ScriptedOptional {
+        id: ProviderId,
+        priority: u8,
+        results: Arc<Mutex<VecDeque<SectionResult<DnsObservation>>>>,
+        gate: Option<Arc<Notify>>,
+        fidelity_limited: bool,
+        observes: Arc<AtomicUsize>,
+    }
+
+    impl ScriptedOptional {
+        fn new(
+            id: ProviderId,
+            priority: u8,
+            results: Vec<SectionResult<DnsObservation>>,
+        ) -> (Self, Arc<AtomicUsize>) {
+            let observes = Arc::new(AtomicUsize::new(0));
+            (
+                Self {
+                    id,
+                    priority,
+                    results: Arc::new(Mutex::new(results.into())),
+                    gate: None,
+                    fidelity_limited: false,
+                    observes: Arc::clone(&observes),
+                },
+                observes,
+            )
+        }
+
+        fn gated(mut self, gate: Arc<Notify>) -> Self {
+            self.gate = Some(gate);
+            self
+        }
+
+        fn fidelity_limited(mut self) -> Self {
+            self.fidelity_limited = true;
+            self
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl DiscoveryProvider for ScriptedOptional {
+        fn id(&self) -> ProviderId {
+            self.id.clone()
+        }
+
+        fn priority(&self) -> u8 {
+            self.priority
+        }
+
+        async fn observe(&mut self) -> ProviderObservation {
+            self.observes.fetch_add(1, Ordering::SeqCst);
+            if let Some(gate) = &self.gate {
+                gate.notified().await;
+            }
+            let result = self
+                .results
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .pop_front()
+                .unwrap_or(SectionResult::NotObserved);
+            dns_observation(
+                self.id.clone(),
+                self.priority,
+                result,
+                self.fidelity_limited,
+            )
+        }
+    }
+
+    fn report_for<'a>(
+        snapshot: &'a NetworkSnapshot,
+        id: &ProviderId,
+    ) -> &'a araiguma_core::provider::ProviderReport {
+        snapshot
+            .providers
+            .iter()
+            .find(|report| &report.provider == id)
+            .unwrap_or_else(|| panic!("missing provider report for {id:?}"))
     }
 
     struct FakeProvider(ProviderId);
@@ -429,7 +750,7 @@ mod tests {
     #[async_trait::async_trait]
     impl DiscoveryProvider for FakeProvider {
         fn id(&self) -> ProviderId {
-            self.0
+            self.0.clone()
         }
         fn priority(&self) -> u8 {
             if self.0 == ProviderId::Netlink {
@@ -439,7 +760,7 @@ mod tests {
             }
         }
         async fn observe(&mut self) -> ProviderObservation {
-            empty_observation(self.0)
+            empty_observation(self.0.clone())
         }
     }
 
@@ -467,6 +788,8 @@ mod tests {
             addresses: vec![],
             routes: vec![],
             providers: vec![],
+            dns: None,
+            connections: None,
         }
     }
 
@@ -656,7 +979,10 @@ mod tests {
         let value = serde_json::to_value(Envelope::snapshot(1, empty_snapshot())).unwrap();
         assert_eq!(value["event"], "snapshot");
         assert_eq!(value["seq"], 1);
-        assert_eq!(value["snapshot"]["schemaVersion"], 3);
+        assert_eq!(
+            value["snapshot"]["schemaVersion"],
+            araiguma_core::snapshot::SNAPSHOT_SCHEMA_VERSION
+        );
         assert_eq!(value["snapshot"]["timestampMs"], 0);
 
         let value = serde_json::to_value(Envelope::changed(
@@ -698,7 +1024,10 @@ mod tests {
             serde_json::from_str(&Envelope::snapshot(1, empty_snapshot()).to_cli_json_string())
                 .unwrap();
         assert_eq!(value["event"], "snapshot");
-        assert_eq!(value["snapshot"]["schemaVersion"], 3);
+        assert_eq!(
+            value["snapshot"]["schemaVersion"],
+            araiguma_core::snapshot::SNAPSHOT_SCHEMA_VERSION
+        );
         assert!(value.get("seq").is_none());
 
         let value: serde_json::Value = serde_json::from_str(
@@ -751,5 +1080,359 @@ mod tests {
             envelope.notified_by.as_deref(),
             Some(["newLink".to_string(), "newRoute".to_string()].as_slice())
         );
+    }
+
+    #[test]
+    fn registry_is_deterministic_and_rejects_duplicate_identities() {
+        let mut registry = ProviderRegistry::new();
+        registry
+            .register(Box::new(FakeProvider(ProviderId::SysFs)))
+            .expect("sysfs");
+        registry
+            .register(Box::new(FakeProvider(ProviderId::Netlink)))
+            .expect("netlink");
+        registry
+            .register(Box::new(FakeProvider(ProviderId::NetworkManager)))
+            .expect("NetworkManager");
+        let error = registry
+            .register(Box::new(FakeProvider(ProviderId::Netlink)))
+            .expect_err("duplicate identity must be rejected");
+        assert!(error.contains("duplicateProvider"));
+        assert_eq!(
+            registry.ids(),
+            vec![
+                ProviderId::Netlink,
+                ProviderId::SysFs,
+                ProviderId::NetworkManager
+            ]
+        );
+    }
+
+    #[test]
+    fn registry_construction_does_not_observe() {
+        let (provider, observes) = ScriptedOptional::new(
+            ProviderId::SystemdResolved,
+            3,
+            vec![SectionResult::Observed(Vec::new())],
+        );
+        let mut registry = ProviderRegistry::new();
+        registry.register(Box::new(provider)).expect("register");
+        assert_eq!(observes.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn default_registry_contains_all_four_providers_in_order() {
+        let engine = Engine::default_providers();
+        assert_eq!(
+            engine.provider_ids(),
+            vec![
+                ProviderId::Netlink,
+                ProviderId::SysFs,
+                ProviderId::NetworkManager,
+                ProviderId::SystemdResolved
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn initial_snapshot_does_not_wait_for_optional_providers() {
+        let gate = Arc::new(Notify::new());
+        let (optional, observes) = ScriptedOptional::new(
+            ProviderId::SystemdResolved,
+            3,
+            vec![SectionResult::Observed(Vec::new())],
+        );
+        let optional = optional.gated(Arc::clone(&gate));
+        let mut engine = Engine::new(vec![
+            Box::new(FakeProvider(ProviderId::Netlink)),
+            Box::new(optional),
+        ]);
+
+        let document = tokio::time::timeout(Duration::from_millis(100), engine.snapshot_document())
+            .await
+            .expect("initial snapshot must not wait for optional providers")
+            .expect("snapshot");
+        assert_eq!(observes.load(Ordering::SeqCst), 0);
+        assert!(document.dns.is_none());
+        let report = report_for(&document, &ProviderId::SystemdResolved);
+        assert_eq!(report.state, ProviderState::NotYetObserved);
+        assert!(report
+            .sections
+            .iter()
+            .all(|section| { matches!(section.outcome, SectionOutcome::NotObserved) }));
+
+        gate.notify_one();
+        let envelope = engine
+            .refresh_optional()
+            .await
+            .expect("optional refresh produces an envelope");
+        assert_eq!(envelope.event, EnvelopeKind::Changed);
+        let current = engine.current_document().expect("document");
+        assert_eq!(current.dns, Some(Vec::new()));
+        assert_eq!(
+            report_for(current, &ProviderId::SystemdResolved).state,
+            ProviderState::Available
+        );
+    }
+
+    #[tokio::test]
+    async fn optional_success_empty_and_failure_replace_the_document() {
+        let (optional, _observes) = ScriptedOptional::new(
+            ProviderId::SystemdResolved,
+            3,
+            vec![
+                SectionResult::Observed(vec![empty_dns()]),
+                SectionResult::Observed(Vec::new()),
+                SectionResult::Unavailable,
+                SectionResult::PermissionDenied,
+                SectionResult::Failed("timeout".to_owned()),
+                SectionResult::Failed("malformedResponse".to_owned()),
+            ],
+        );
+        let mut engine = Engine::new(vec![
+            Box::new(FakeProvider(ProviderId::Netlink)),
+            Box::new(optional),
+        ]);
+        let _ = engine.snapshot_document().await.expect("seed");
+
+        let _ = engine.refresh_optional().await.expect("success");
+        assert_eq!(
+            engine
+                .current_document()
+                .unwrap()
+                .dns
+                .as_ref()
+                .map(Vec::len),
+            Some(1)
+        );
+
+        let _ = engine.refresh_optional().await.expect("empty");
+        assert_eq!(engine.current_document().unwrap().dns, Some(Vec::new()));
+
+        let _ = engine.refresh_optional().await.expect("unavailable");
+        assert!(engine.current_document().unwrap().dns.is_none());
+        assert_eq!(
+            report_for(
+                engine.current_document().unwrap(),
+                &ProviderId::SystemdResolved
+            )
+            .state,
+            ProviderState::Unavailable
+        );
+
+        let _ = engine.refresh_optional().await.expect("permission");
+        assert!(engine.current_document().unwrap().dns.is_none());
+        let _ = engine.refresh_optional().await.expect("timeout");
+        assert!(engine.current_document().unwrap().dns.is_none());
+        let _ = engine.refresh_optional().await.expect("malformed");
+        assert!(engine.current_document().unwrap().dns.is_none());
+    }
+
+    #[tokio::test]
+    async fn optional_partial_observation_is_degraded_not_failed() {
+        let (optional, _) = ScriptedOptional::new(
+            ProviderId::SystemdResolved,
+            3,
+            vec![SectionResult::Observed(Vec::new())],
+        );
+        let optional = optional.fidelity_limited();
+        let mut engine = Engine::new(vec![
+            Box::new(FakeProvider(ProviderId::Netlink)),
+            Box::new(optional),
+        ]);
+        let _ = engine.snapshot_document().await.expect("seed");
+        let _ = engine.refresh_optional().await.expect("partial");
+        let document = engine.current_document().expect("document");
+        assert_eq!(document.dns, Some(Vec::new()));
+        assert_eq!(
+            report_for(document, &ProviderId::SystemdResolved).state,
+            ProviderState::Degraded
+        );
+    }
+
+    #[tokio::test]
+    async fn optional_disappearance_and_recovery_do_not_restart_the_engine() {
+        let (optional, observes) = ScriptedOptional::new(
+            ProviderId::SystemdResolved,
+            3,
+            vec![
+                SectionResult::Observed(vec![empty_dns()]),
+                SectionResult::Unavailable,
+                SectionResult::Observed(vec![empty_dns()]),
+            ],
+        );
+        let mut engine = Engine::new(vec![
+            Box::new(FakeProvider(ProviderId::Netlink)),
+            Box::new(optional),
+        ]);
+        let _ = engine.snapshot_document().await.expect("seed");
+
+        let _ = engine.refresh_optional().await.expect("first");
+        assert_eq!(
+            engine
+                .current_document()
+                .unwrap()
+                .dns
+                .as_ref()
+                .map(Vec::len),
+            Some(1)
+        );
+        let _ = engine.refresh_optional().await.expect("disappear");
+        assert!(engine.current_document().unwrap().dns.is_none());
+        let _ = engine.refresh_optional().await.expect("recover");
+        assert_eq!(
+            engine
+                .current_document()
+                .unwrap()
+                .dns
+                .as_ref()
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(observes.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn optional_refresh_does_not_observe_the_baseline_again() {
+        let baseline_observes = Arc::new(AtomicUsize::new(0));
+        let baseline = FakeProviderWithCount(ProviderId::Netlink, Arc::clone(&baseline_observes));
+        let (optional, _) = ScriptedOptional::new(
+            ProviderId::SystemdResolved,
+            3,
+            vec![SectionResult::Observed(Vec::new())],
+        );
+        let mut engine = Engine::new(vec![Box::new(baseline), Box::new(optional)]);
+        let _ = engine.snapshot_document().await.expect("seed");
+        assert_eq!(baseline_observes.load(Ordering::SeqCst), 1);
+        let _ = engine.refresh_optional().await.expect("optional");
+        assert_eq!(
+            baseline_observes.load(Ordering::SeqCst),
+            1,
+            "optional refresh must not re-observe the baseline"
+        );
+    }
+
+    struct SlowOptional {
+        active: Arc<AtomicUsize>,
+        max_active: Arc<AtomicUsize>,
+    }
+
+    impl SlowOptional {
+        fn new(max_active: Arc<AtomicUsize>) -> Self {
+            Self {
+                active: Arc::new(AtomicUsize::new(0)),
+                max_active,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl DiscoveryProvider for SlowOptional {
+        fn id(&self) -> ProviderId {
+            ProviderId::SystemdResolved
+        }
+
+        fn priority(&self) -> u8 {
+            3
+        }
+
+        async fn observe(&mut self) -> ProviderObservation {
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(active, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            self.active.fetch_sub(1, Ordering::SeqCst);
+            dns_observation(
+                self.id(),
+                self.priority(),
+                SectionResult::Observed(Vec::new()),
+                false,
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn optional_refreshes_do_not_overlap() {
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let optional = SlowOptional::new(Arc::clone(&max_active));
+        let engine = Arc::new(tokio::sync::Mutex::new(Engine::new(vec![
+            Box::new(FakeProvider(ProviderId::Netlink)),
+            Box::new(optional),
+        ])));
+
+        let first_engine = Arc::clone(&engine);
+        let first = tokio::spawn(async move { first_engine.lock().await.refresh_optional().await });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let second_engine = Arc::clone(&engine);
+        let second =
+            tokio::spawn(async move { second_engine.lock().await.refresh_optional().await });
+
+        let _ = first.await.expect("first refresh");
+        let _ = second.await.expect("second refresh");
+        assert_eq!(
+            max_active.load(Ordering::SeqCst),
+            1,
+            "optional refreshes must not overlap"
+        );
+    }
+
+    #[tokio::test]
+    async fn optional_change_is_delivered_to_subscribers() {
+        let (optional, _) = ScriptedOptional::new(
+            ProviderId::SystemdResolved,
+            3,
+            vec![SectionResult::Observed(vec![empty_dns()])],
+        );
+        let mut engine = Engine::new(vec![
+            Box::new(FakeProvider(ProviderId::Netlink)),
+            Box::new(optional),
+        ]);
+        let (_id, mut rx) = engine.subscribe_and_snapshot().await.expect("subscribe");
+        let opening = rx.recv().await.expect("opening snapshot");
+        assert_eq!(opening.event, EnvelopeKind::Snapshot);
+        assert!(opening.snapshot.as_ref().unwrap().dns.is_none());
+
+        let envelope = engine.refresh_optional().await.expect("optional change");
+        assert_eq!(envelope.event, EnvelopeKind::Changed);
+        engine.broadcast(&envelope);
+        let changed = rx.recv().await.expect("changed envelope");
+        assert_eq!(changed.event, EnvelopeKind::Changed);
+        assert_eq!(
+            changed.notified_by.as_deref(),
+            Some(["optionalRefresh".to_string()].as_slice())
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_cancels_optional_refresh() {
+        let (optional, _) = ScriptedOptional::new(
+            ProviderId::SystemdResolved,
+            3,
+            vec![SectionResult::Observed(Vec::new())],
+        );
+        let mut engine = Engine::new(vec![
+            Box::new(FakeProvider(ProviderId::Netlink)),
+            Box::new(optional),
+        ]);
+        let _ = engine.snapshot_document().await.expect("seed");
+        engine.request_shutdown();
+        assert!(engine.refresh_optional().await.is_none());
+    }
+
+    struct FakeProviderWithCount(ProviderId, Arc<AtomicUsize>);
+
+    #[async_trait::async_trait]
+    impl DiscoveryProvider for FakeProviderWithCount {
+        fn id(&self) -> ProviderId {
+            self.0.clone()
+        }
+
+        fn priority(&self) -> u8 {
+            0
+        }
+
+        async fn observe(&mut self) -> ProviderObservation {
+            self.1.fetch_add(1, Ordering::SeqCst);
+            empty_observation(self.0.clone())
+        }
     }
 }

@@ -14,6 +14,7 @@
 //! snapshot, never hidden.
 
 use std::io::Read as _;
+use std::time::Duration;
 
 use araiguma_core::{build_topology, NetworkSnapshot, TopologyDocument};
 use araiguma_engine::{ChangeFeed, Engine};
@@ -109,7 +110,9 @@ pub fn parse_args(args: &[String]) -> Result<Command, String> {
 
 /// Observe once through the shared engine and merge.
 pub async fn observe_merged() -> NetworkSnapshot {
-    Engine::default_providers().observe_now().await
+    // One-shot CLI output is an initial observation: it must not wait for
+    // optional providers. Optional providers appear as NotYetObserved.
+    Engine::default_providers().observe_baseline_now().await
 }
 
 /// Serialize a snapshot for `araiguma snapshot`.
@@ -133,14 +136,15 @@ pub fn render_topology(document: &TopologyDocument, pretty: bool) -> String {
 /// Load a snapshot from a file (or stdin when `input` is None) and project
 /// it. Read-only; never observes the live system.
 ///
-/// Schema policy: current documents are v3 (three-state `macAddress`,
-/// optional veth `peerIfindex` — WO-03 M2, optional route `nextHops` —
-/// WO-03 M3; both defaulted, so pre-v3 documents parse unchanged).
-/// v2 documents are accepted as-is. v1 documents are accepted **only
-/// when unambiguous** — every `macAddress` must be a non-null string; a
-/// v1 `null` cannot distinguish "observed no hardware address" from
-/// "not observed" and is rejected with an explanation instead of being
-/// silently assigned a meaning. Unknown versions are rejected.
+/// Schema policy: current documents are v4 (three-state `macAddress`,
+/// optional veth `peerIfindex`, optional route `nextHops`, and optional
+/// `dns`/`connections` collections). v3 and v2 documents parse unchanged;
+/// the v4-only fields are absent, which means not observed. v1 documents
+/// are accepted **only when unambiguous** — every `macAddress` must be a
+/// non-null string; a v1 `null` cannot distinguish "observed no hardware
+/// address" from "not observed" and is rejected with an explanation
+/// instead of being silently assigned a meaning. Unknown versions are
+/// rejected.
 pub fn project_snapshot_to_topology(input: Option<&str>) -> Result<TopologyDocument, String> {
     let raw = match input {
         Some(path) => {
@@ -183,27 +187,70 @@ pub async fn run_watch<F: std::future::Future<Output = ()>>(
              Observation-only mode is available via `araiguma snapshot`."
         )
     })?;
-    run_watch_with_feed(out, stop, feed, Engine::default_providers()).await
+    run_watch_with_feed_and_optional_interval(
+        out,
+        stop,
+        feed,
+        Engine::default_providers(),
+        araiguma_engine::OPTIONAL_POLL_INTERVAL,
+    )
+    .await
 }
 
+#[cfg(test)]
 async fn run_watch_with_feed<F, S>(
     out: &mut dyn std::io::Write,
     stop: &mut std::pin::Pin<&mut S>,
-    mut feed: F,
-    mut engine: Engine,
+    feed: F,
+    engine: Engine,
 ) -> Result<(), String>
 where
     F: ChangeFeed,
     S: std::future::Future<Output = ()>,
 {
-    // The opening envelope: the current state, before any change arrives.
+    run_watch_with_feed_and_optional_interval(
+        out,
+        stop,
+        feed,
+        engine,
+        araiguma_engine::OPTIONAL_POLL_INTERVAL,
+    )
+    .await
+}
+
+async fn run_watch_with_feed_and_optional_interval<F, S>(
+    out: &mut dyn std::io::Write,
+    stop: &mut std::pin::Pin<&mut S>,
+    mut feed: F,
+    mut engine: Engine,
+    optional_interval: Duration,
+) -> Result<(), String>
+where
+    F: ChangeFeed,
+    S: std::future::Future<Output = ()>,
+{
+    // The opening envelope: the baseline state, before any change arrives.
+    // Optional providers are represented as NotYetObserved and refreshed
+    // independently on the optional cadence.
     let opening = engine.snapshot_envelope().await;
     writeln!(out, "{}", opening.to_cli_json_string()).map_err(io_error)?;
+
+    let mut optional_timer = tokio::time::interval_at(
+        tokio::time::Instant::now() + optional_interval,
+        optional_interval,
+    );
+    optional_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
         let signal = tokio::select! {
             _ = &mut *stop => return Ok(()),
             signal = feed.next_signal() => signal,
+            _ = optional_timer.tick() => {
+                if let Some(envelope) = engine.refresh_optional().await {
+                    writeln!(out, "{}", envelope.to_cli_json_string()).map_err(io_error)?;
+                }
+                continue;
+            }
         };
         let Some(signal) = signal else {
             return Ok(());
