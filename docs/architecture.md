@@ -88,17 +88,25 @@ backend-projected topology.
 | 1 | WO-01R | original snapshot/topology documents |
 | 2 | WO-02 correction | three-state `MacObservation` everywhere a MAC appears; topology edge kinds `bondMember` and `masterMember` (a master relationship's flavor comes from the master's own kind observation, never an assumption) |
 | 3 | WO-03 | veth `peerIfindex` on interfaces + `vethPeer` topology edge (M2); route `nextHops` — `'single'` / `{ multi: [...] }` / `{ undecoded: reason }` (M3). All additions are serde-defaulted, so v2 documents parse unchanged |
+| 4 | WO-06 | additive optional `dns` and `connections` collections; `dns` and `connections` section kinds; provider/source/section identities accept unknown non-empty strings and round-trip them as raw strings. v3 documents parse with both collections absent (`None` = not observed); explicit `null` is rejected |
 
 Writers emit the current version; readers accept v1 only where it is
 unambiguous (a v1 document whose every `macAddress` is a non-null string).
-Unknown versions are rejected with the supported range stated.
+Unknown versions are rejected with the supported range stated. v4 `dns`
+and `connections` are omitted when not observed; an observed empty
+collection is `[]`. DNS `mode` is an optional resolver-mode token: known
+and unknown non-empty tokens are preserved, while empty or non-token
+values (whitespace, control characters, or punctuation other than `.`,
+`_`, `-`, `/`) are rejected at the document boundary. DNS configuration
+is evidence only and is not used in diagnostics.
 
 ## Provider abstraction
 
 A provider is a read-only source of network state implementing
 `DiscoveryProvider` (async). A run produces a `ProviderObservation` with a
-per-section result (`Observed(items)` / `Failed(error)` / `Unsupported` /
-`NotObserved`) for interfaces, IPv4/IPv6 addresses, and IPv4/IPv6 routes.
+per-section result (`Observed(items)` / `Failed(error)` / `Unavailable` /
+`PermissionDenied` / `Unsupported` / `NotObserved`) for interfaces,
+IPv4/IPv6 addresses, IPv4/IPv6 routes, DNS, and connections.
 
 Provider states (six, derived from section results — `NotObserved` is never
 conflated with `Unsupported`):
@@ -106,25 +114,274 @@ conflated with `Unsupported`):
 | State | Meaning |
 |---|---|
 | `available` | every supported section observed, no fidelity limits |
-| `degraded` | observed, but with known fidelity limits (sysfs classification ambiguity) |
-| `partial` | some sections observed, and at least one supported section **failed or was never attempted** — the run is incomplete either way |
-| `unavailable` | no section observed and at least one failure |
+| `degraded` | observed with known fidelity limits, or the provider attempted work but every supported section failed or was permission-denied without producing an observation |
+| `partial` | some sections observed, and at least one supported section failed, was unavailable, was permission-denied, or was never attempted |
+| `unavailable` | no section observed and at least one section was unavailable, with no failure or permission denial |
 | `notSupported` | no supported sections in this environment at all |
 | `notYetObserved` | nothing attempted-and-supported yet (an unattempted section is not evidence of missing functionality) |
 
-Aggregation rules, in order: nothing attempted-and-supported → `NotYetObserved`
-when some section is unattempted, else `NotSupported`; failures with no
-observations → `Unavailable`; observations alongside any failed or unattempted
-supported section → `Partial`; a complete run → `Degraded`/`Available`.
-Unsupported-in-principle sections never lower a state.
+Aggregation rules, in order: all `NotObserved` → `NotYetObserved`; all
+`Unsupported` → `NotSupported`; any `Observed` with any `Failed`,
+`Unavailable`, `PermissionDenied`, or `NotObserved` → `Partial`, otherwise
+`Degraded` when fidelity-limited and `Available` otherwise; with no
+`Observed`, any `Failed` or `PermissionDenied` → `Degraded`, otherwise any
+`Unavailable` → `Unavailable`, otherwise any `NotObserved` →
+`NotYetObserved`, otherwise `NotSupported`. `Unsupported` never lowers a
+state. An empty section list reports `NotSupported`.
 
 A failing provider never discards other providers' observations: the merge
 keeps whatever the remaining sources observed and preserves every failure
 report in `snapshot.providers`.
 
-Future providers (NetworkManager D-Bus, systemd-resolved D-Bus,
-systemd-networkd) implement the same trait at their own priority; nothing in
-the pipeline assumes a specific provider set.
+DNS and connection sections are additive, provenance-preserving, and
+duplicate-preserving. Each section has one owning provider in WO-06
+(systemd-resolved owns `dns`, NetworkManager owns `connections`);
+non-owners report `Unsupported`. The merged collection is `None` unless
+every owner produced `Observed`; an owner's observed empty collection is
+preserved as `Some([])`. DNS observations sort globally before link scope
+and then by ifindex; connection observations sort by connection type,
+state, devices, and VPN flag. Duplicate identical observations are kept.
+DNS and connection observations never create topology nodes or edges.
+
+Future providers (systemd-networkd) implement the
+same trait at their own priority; nothing in the pipeline assumes a specific
+provider set.
+
+## D-Bus foundation (WO-06B)
+
+`crates/provider-dbus` is the only crate permitted to speak D-Bus. It is a
+deliberately narrow, read-only transport foundation for the two optional
+providers; it is not a general-purpose client and the desktop crate does not
+depend on it.
+
+The dependency is pinned exactly to `zbus = 6.5.0` with
+`default-features = false` and only the `tokio` and `proxy` features. Each
+provider gets its own `DbusFoundation`, which owns one system-bus connection
+resolved through `DBUS_SYSTEM_BUS_ADDRESS` and the platform default.
+
+The permitted surface is:
+
+- **Bus-driver ownership preflight:** `NameHasOwner` followed by
+  `GetNameOwner`. Both are addressed to `org.freedesktop.DBus`; they are
+  classified separately from application calls. If `NameHasOwner` is false,
+  the connection is closed and `ServiceUnavailable` is returned without any
+  application message.
+- **Application property reads:** only
+  `org.freedesktop.DBus.Properties.Get`, and only for the exact
+  service/path/interface/property combinations in
+  `crates/provider-dbus/src/policy.rs`. Every call sets `NO_AUTO_START`;
+  every proxy is built with `CacheProperties::No`, so no implicit `GetAll`
+  is generated. The reply variant's signature is checked against the
+  approved property type before it reaches a provider.
+- **NetworkManager signals:** only `StateChanged`, `DeviceAdded`, and
+  `DeviceRemoved` on `/org/freedesktop/NetworkManager`. Match rules pin the
+  well-known sender, path, interface, and member; every delivered message is
+  validated again against the unique owner captured by preflight, plus the
+  exact member and body signature. `PropertiesChanged` and
+  `NameOwnerChanged` are never subscribed. systemd-resolved has no signal
+  surface; its observation stays polling-only.
+
+The allow-list excludes NetworkManager manager metadata, Wi-Fi/access-point
+data, active-connection/VPN type metadata, `GetAll`, `Set`, `Introspect`,
+`GetManagedObjects`, `GetSettings`, `GetSecrets`, device `Ip4Config` /
+`Ip6Config` / DHCP configs, every resolved link-level object, and all active
+query methods. There is no name/object enumeration and no service
+activation. Failures are reduced to the bounded `DbusError` categories
+(`BusUnavailable`, `ServiceUnavailable`, `PermissionDenied`, `Timeout`,
+`MalformedResponse`, `UnsupportedRequest`, `RejectedSignal`, `Protocol`);
+raw zbus errors, D-Bus error strings, object paths, DNS values, connection
+identifiers, addresses, and arbitrary service text never enter public
+diagnostics.
+
+`crates/provider-dbus/tests/private_bus.rs` proves the contract on a private
+`dbus-daemon` with no service directories: mock NetworkManager and resolved
+services with programmable replies, a separate `BecomeMonitor` connection,
+and wire assertions for preflight, request flags, signatures, prohibited
+requests, message absence, signal rules, shutdown, timeouts, and service
+disappearance. No system bus or host service is touched.
+
+### WO-06B-C1 corrective amendment (2026-11-25)
+
+The original WO-06B allow-list recorded `DNSEx` as `a(iiay)`. That is the
+signature of the distinct `DNS` property. The accepted `DNSEx` property is
+`a(iiayqs)`:
+
+- `i` ifindex;
+- `i` address family;
+- `ay` address bytes;
+- `q` port;
+- `s` server name/SNI.
+
+The correction is required because real systemd-resolved services expose the
+five-field form. The original WO-06B implementation and acceptance history
+remain recorded; this amendment supersedes only the `DNSEx` signature and its
+directly affected tests/mocks. The service, object path, interface, property
+name, `Properties.Get` restriction, `NO_AUTO_START`, `CacheProperties::No`,
+and all prohibitions on activation, enumeration, setters, `GetAll`,
+`GetManagedObjects`, `Introspect`, settings/secrets, and signals are
+unchanged.
+
+Affected files: `crates/provider-dbus/src/policy.rs`,
+`crates/provider-dbus/tests/private_bus.rs`,
+`crates/provider-resolved/src/lib.rs`,
+`crates/provider-resolved/tests/private_bus.rs`, and this document.
+
+New verification evidence: the foundation accepts a five-field `DNSEx` reply
+and rejects a legacy three-field reply; the provider retains non-default,
+zero, and maximum `u16` ports as `Some(port)`; same-address/different-port
+servers remain distinct; SNI is absent from observations, reports,
+serialization, errors, and `Debug`; all prior wire-level restrictions remain
+asserted.
+
+## NetworkManager provider (WO-06C)
+
+`crates/provider-nm` implements the optional NetworkManager discovery
+provider on top of the accepted D-Bus foundation. Construction is
+side-effect-free; the first `observe()` connects, preflights ownership,
+subscribes to the three approved signals, drains pending signals, and then
+performs a fresh property read. Signals are a refresh hint only and never
+replace the property observation.
+
+The provider reads only:
+
+- manager `ActiveConnections` (`ao`);
+- per active connection `Devices` (`ao`), `State` (`u`), `Type` (`s`), and
+  `Vpn` (`b`);
+- per device `Interface` (`s`), falling back to `IpInterface` (`s`) only when
+  `Interface` is absent or empty.
+
+Device names are resolved to kernel ifindexes through
+`<sys_root>/class/net/<name>/ifindex` (default `/sys`, injectable for
+tests). A name that cannot be resolved is reported with the static
+`unresolvedDevice` note and an empty device list; an ifindex is never
+invented. D-Bus object paths are used transiently for property reads and
+never become observation identity.
+
+The provider does not read hardware addresses, IP4Config/IP6Config, settings
+or secrets, Wi-Fi/AP data, display names, UUIDs, VPN type, manager metadata,
+or any other property. It never calls activation, deactivation, enable,
+sleep, reload, scan, setters, `GetAll`, `GetSettings`, `GetSecrets`,
+`GetManagedObjects`, or `Introspect`.
+
+A successful read maps to `Observed` (including a genuinely empty active
+connection list). A missing service or bus maps to `Unavailable`; access
+denial maps to `PermissionDenied`; timeout and malformed replies map to the
+bounded `timeout` / `malformedResponse` failure codes. If some active
+connections can be read and others cannot, the successful observations are
+kept and the run is marked fidelity-limited with `partialConnectionRead`.
+A failed refresh never leaves a previous observation in place. The provider
+report carries all seven v4 sections, with only `connections` populated.
+
+`crates/provider-nm/tests/private_bus.rs` exercises the provider against
+the same private-bus harness, with a path-aware mock and fixture sysfs
+tree. It verifies the approved request set, `NO_AUTO_START`, signal
+subscription and sender pinning, empty versus unobserved results,
+duplicates, partial reads, unresolved devices, timeouts, malformed
+replies, stale-data prevention, v4 serialization, and diagnostic privacy.
+
+## systemd-resolved provider (WO-06D)
+
+`crates/provider-resolved` implements the optional systemd-resolved discovery
+provider on the accepted D-Bus foundation. Construction is side-effect-free;
+each `observe()` connects if needed, reads the three approved manager-level
+properties, and assembles deterministic DNS observations. It never reads
+per-link objects, never calls `GetLink`, never invokes a resolution method,
+never mutates configuration, and never subscribes to signals.
+
+The approved reads are exactly:
+
+- `DNSEx` (`a(iiayqs)`) — ifindex, address family, address bytes, port,
+  and server name/SNI;
+- `Domains` (`a(isb)`) — ifindex, domain, route-only boolean;
+- `ResolvConfMode` (`s`) — global resolver mode.
+
+`DNSEx` is not the older `DNS` property: `DNS` is `a(iiay)`, while `DNSEx`
+adds the port and server name. The provider retains the port as
+`DnsServer.port = Some(port)` (including port zero) and discards the
+server-name/SNI string immediately during decoding; SNI never enters an
+observation, report, diagnostic, error, or `Debug` representation.
+
+`DNSEx` entries are grouped by ifindex: `0` is global scope and a positive
+index is link scope. Invalid indexes, address families, and address lengths
+are skipped as malformed entries; an invalid index is never translated into
+global scope. IPv4 uses a four-byte address and IPv6 a sixteen-byte address.
+`DnsServer.port` is therefore `None` only for a source that does not supply a
+port; `DNSEx` always supplies one.
+
+`Domains` entries use the same scope rules. `route_only = false` becomes a
+search domain; `route_only = true` becomes a routing domain. `ResolvConfMode`
+is attached only to a global observation that already exists from observed
+DNS servers or domains; the provider never fabricates an empty global scope
+merely to carry the mode. An invalid or unavailable mode leaves the global
+observation's `mode` as `None` and adds the static
+`resolvConfModeUnavailable` note.
+
+The provider does not read DNSSEC negative trust anchors, cache statistics,
+current query activity, fallback DNS, security metadata, default-route
+metadata, LLMNR, MulticastDNS, DNS-over-TLS, or any other property. It never
+claims that a configured server is reachable or that name resolution works.
+
+A successful read with no entries is `Observed([])`. A missing service or bus
+is `Unavailable`; access denial is `PermissionDenied`; timeout and malformed
+replies map to the bounded `timeout` / `malformedResponse` codes. If one
+property fails while others supply valid data, the valid observations are
+kept and the run is marked fidelity-limited. If no valid observation can be
+assembled, the section reports the failure rather than an observed empty
+collection. A failed refresh keeps no stale DNS data. Provider reports carry
+all seven v4 sections, with only `dns` populated.
+
+`crates/provider-resolved/tests/private_bus.rs` verifies the provider on the
+private-bus harness with a path-aware resolved mock. It covers global and
+per-link scopes, IPv4/IPv6, search/routing domains, mode mapping, empty and
+partial results, malformed tuples, invalid modes, permission/timeout/
+malformed failures, service disappearance, v4 serialization, and diagnostic
+privacy. Wire assertions prove that only the three approved `Properties.Get`
+requests are sent, all carry `NO_AUTO_START`, and no `GetLink`, resolution
+method, `GetAll`, setter, or signal subscription is transmitted.
+
+## Engine provider registry and optional lifecycle (WO-06E)
+
+`crates/engine` owns a deterministic `ProviderRegistry` and the optional
+provider lifecycle. The registry registers providers independently, rejects
+duplicate identities, and orders them by `(priority, identity)`:
+
+- netlink — 0;
+- sysfs — 1;
+- NetworkManager — 2;
+- systemd-resolved — 3.
+
+Registration and construction are side-effect-free. The default registry
+constructs all four providers but performs no D-Bus I/O until an optional
+provider is actually observed.
+
+The opening document is baseline-only. `snapshot_document()` observes the
+baseline providers and merges them with stable `NotYetObserved` placeholders
+for optional providers that have not completed a first observation. It never
+waits for optional D-Bus work. A successful optional observation replaces
+its placeholder; a successful empty observation remains `Some([])`; a
+failed, unavailable, denied, or malformed refresh removes stale optional
+data from the merged document.
+
+Optional providers are refreshed independently on the authorized 30 s
+poll cadence (RD-08). The existing 150 ms change debounce and 5 s shutdown
+grace remain unchanged. The engine stores the latest baseline observations
+and the latest optional observations, so a baseline change/resync never
+re-observes optional providers, and an optional refresh never re-observes
+the baseline. Refreshes are serialized by the engine lock; there is no
+overlapping refresh and no busy loop. The engine itself spawns no background
+task: the CLI watch loop and desktop driver own the timer and stop it on
+cancellation/shutdown.
+
+An optional refresh that changes the document produces the existing
+`changed` envelope with `notifiedBy: ["optionalRefresh"]`; the frontend’s
+existing changed-event path fetches a fresh snapshot. Provider reports,
+section outcomes, DNS port-sensitive identity, DNS multiset behavior, and
+content-based connection identity are unchanged.
+
+The 2 s per-provider deadline and 5 s total optional refresh budget remain
+open decisions; they are not silently implemented. The current bounds are
+the providers’ existing 5 s operation timeout, the 30 s optional cadence,
+and the 5 s shutdown grace.
 
 The sysfs provider reads `/sys/class/net` (interfaces), `/proc/net/if_inet6`
 (IPv6 addresses), `/proc/net/route` (main-table IPv4 routes), and — since
@@ -281,8 +538,9 @@ mode), and is removed when the view unmounts.
 
 ## Remaining integration points
 
-- NetworkManager / systemd-resolved D-Bus providers (trait slots exist; the
-  current stage does not add these optional providers).
+- NetworkManager (WO-06C) and systemd-resolved (WO-06D) providers are
+  implemented, and the engine registry/optional lifecycle (WO-06E) is in
+  place. The real Ubuntu 24.04 host checkpoint (WO-06F) remains separate.
 - Typed IPC errors and the full Document-04 subscription lifecycle (UUID v4
   IDs, idempotent cancellation, `Cancelled`, terminal `ended`, and
   per-subscription channels) remain deferred. Stage 1 returns plain string
