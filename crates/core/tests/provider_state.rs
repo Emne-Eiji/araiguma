@@ -1,7 +1,9 @@
 //! Provider-state classification: all six states must be reachable and
 //! correctly derived from section results.
 
-use araiguma_core::provider::{ProviderId, ProviderObservation, ProviderState, SectionResult};
+use araiguma_core::provider::{
+    ProviderId, ProviderObservation, ProviderState, SectionOutcome, SectionResult,
+};
 
 fn base() -> ProviderObservation {
     ProviderObservation {
@@ -12,6 +14,8 @@ fn base() -> ProviderObservation {
         addresses_v6: SectionResult::Unsupported,
         routes_v4: SectionResult::Unsupported,
         routes_v6: SectionResult::Unsupported,
+        dns: SectionResult::Unsupported,
+        connections: SectionResult::Unsupported,
         fidelity_limited: false,
         notes: vec![],
     }
@@ -43,13 +47,13 @@ fn some_failed_is_partial() {
 }
 
 #[test]
-fn all_supported_failed_is_unavailable() {
+fn all_supported_failed_is_degraded() {
     let mut o = base();
     o.interfaces = SectionResult::Failed("permission denied".into());
     o.routes_v4 = SectionResult::Failed("permission denied".into());
     // Unsupported sections must not rescue the state.
     o.addresses_v6 = SectionResult::Unsupported;
-    assert_eq!(o.state(), ProviderState::Unavailable);
+    assert_eq!(o.state(), ProviderState::Degraded);
 }
 
 #[test]
@@ -65,7 +69,7 @@ fn empty_observation_is_still_available() {
     o.routes_v6 = SectionResult::Observed(vec![]);
     assert_eq!(o.state(), ProviderState::Available);
     let report = o.summarize();
-    assert_eq!(report.sections.len(), 5);
+    assert_eq!(report.sections.len(), 7);
 }
 
 #[test]
@@ -172,4 +176,92 @@ fn failure_dominates_fidelity_limits() {
     o.routes_v4 = SectionResult::Failed("nope".into());
     o.fidelity_limited = true;
     assert_eq!(o.state(), ProviderState::Partial);
+}
+
+// ── WO-06 outcomes and precedence ────────────────────────────────────────────
+
+#[test]
+fn unavailable_without_observation_is_unavailable() {
+    let mut o = base();
+    o.interfaces = SectionResult::Unavailable;
+    o.routes_v4 = SectionResult::Unavailable;
+    assert_eq!(o.state(), ProviderState::Unavailable);
+}
+
+#[test]
+fn permission_denied_without_observation_is_degraded() {
+    let mut o = base();
+    o.interfaces = SectionResult::PermissionDenied;
+    o.routes_v4 = SectionResult::PermissionDenied;
+    assert_eq!(o.state(), ProviderState::Degraded);
+}
+
+#[test]
+fn failure_and_permission_denied_without_observation_are_degraded() {
+    let mut o = base();
+    o.interfaces = SectionResult::Failed("timeout".into());
+    o.routes_v4 = SectionResult::PermissionDenied;
+    assert_eq!(o.state(), ProviderState::Degraded);
+}
+
+#[test]
+fn unavailable_and_permission_denied_without_observation_are_degraded() {
+    let mut o = base();
+    o.interfaces = SectionResult::Unavailable;
+    o.routes_v4 = SectionResult::PermissionDenied;
+    assert_eq!(o.state(), ProviderState::Degraded);
+}
+
+#[test]
+fn unavailable_dominates_not_observed_without_observation() {
+    let mut o = base();
+    o.interfaces = SectionResult::Unavailable;
+    o.routes_v4 = SectionResult::NotObserved;
+    assert_eq!(o.state(), ProviderState::Unavailable);
+}
+
+#[test]
+fn observed_with_unavailable_or_denied_is_partial() {
+    let mut o = base();
+    o.interfaces = SectionResult::Observed(vec![]);
+    o.routes_v4 = SectionResult::Unavailable;
+    assert_eq!(o.state(), ProviderState::Partial);
+
+    let mut o = base();
+    o.interfaces = SectionResult::Observed(vec![]);
+    o.routes_v4 = SectionResult::PermissionDenied;
+    assert_eq!(o.state(), ProviderState::Partial);
+}
+
+#[test]
+fn all_unsupported_is_not_supported() {
+    let o = ProviderObservation {
+        provider: ProviderId::Netlink,
+        priority: 0,
+        interfaces: SectionResult::Unsupported,
+        addresses_v4: SectionResult::Unsupported,
+        addresses_v6: SectionResult::Unsupported,
+        routes_v4: SectionResult::Unsupported,
+        routes_v6: SectionResult::Unsupported,
+        dns: SectionResult::Unsupported,
+        connections: SectionResult::Unsupported,
+        fidelity_limited: false,
+        notes: vec![],
+    };
+    // The fixed seven-section observation shape represents an empty
+    // section list as all-Unsupported: nothing was attempted and nothing
+    // is supported here.
+    assert_eq!(o.state(), ProviderState::NotSupported);
+}
+
+#[test]
+fn new_outcomes_serialize_with_exact_wire_shapes() {
+    assert_eq!(
+        serde_json::to_value(SectionOutcome::Unavailable).unwrap(),
+        serde_json::json!({ "kind": "unavailable" })
+    );
+    assert_eq!(
+        serde_json::to_value(SectionOutcome::PermissionDenied).unwrap(),
+        serde_json::json!({ "kind": "permissionDenied" })
+    );
 }

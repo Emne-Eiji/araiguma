@@ -9,7 +9,7 @@
 // v1 documents are accepted only where unambiguous (every macAddress a
 // non-null string); v1 null macAddress is rejected with the reason.
 
-import type { NetworkSnapshot, ObservationSource, RouteViaAddr } from '../types';
+import type { NetworkSnapshot, RouteViaAddr } from '../types';
 import { isMacObservation } from './format';
 import {
   asArray,
@@ -42,7 +42,6 @@ const INTERFACE_KINDS = [
   'other',
 ] as const;
 
-const PROVIDER_IDS = ['netlink', 'sysfs'] as const;
 const PROVIDER_STATES = [
   'notYetObserved',
   'available',
@@ -51,7 +50,6 @@ const PROVIDER_STATES = [
   'unavailable',
   'notSupported',
 ] as const;
-const FAMILIES = ['ipv4', 'ipv6'] as const;
 const OPER_STATES = [
   'up',
   'down',
@@ -87,14 +85,7 @@ const ROUTE_TYPES = [
   'nat',
   'xresolve',
 ] as const;
-const SECTION_KINDS = [
-  'interfaces',
-  'addressesV4',
-  'addressesV6',
-  'routesV4',
-  'routesV6',
-] as const;
-const OBSERVATION_SOURCES = ['netlink', 'sysfs', 'procfs'] as const;
+const FAMILIES = ['ipv4', 'ipv6'] as const;
 
 function isMacObservationField(value: unknown, path: string): string {
   if (value === null || value === undefined) {
@@ -112,11 +103,11 @@ function isMacObservationField(value: unknown, path: string): string {
   return value;
 }
 
-function asSource(value: unknown, path: string): ObservationSource {
-  return asEnum(value, OBSERVATION_SOURCES, path);
+function asSource(value: unknown, path: string): string {
+  return asNonEmptyString(value, path);
 }
 
-function asSources(value: unknown, path: string): ObservationSource[] {
+function asSources(value: unknown, path: string): string[] {
   const sources = asArray(value, path).map((item, i) => asSource(item, `${path}[${i}]`));
   // Provenance contract (WO-03-F / AUD-06, parity with the Rust
   // projector): an observation with NO source is invalid — nothing
@@ -308,6 +299,85 @@ function validateRoute(raw: unknown, path: string): void {
   asStringArray(route.notes, `${path}.notes`);
 }
 
+function validateDnsScope(raw: unknown, path: string): void {
+  const scope = asRecord(raw, path);
+  switch (scope.kind) {
+    case 'global':
+      return;
+    case 'link':
+      asInt(scope.ifindex, `${path}.ifindex`, { min: 1 });
+      return;
+    default:
+      fail(path, "expected {kind:'global'} or {kind:'link',ifindex}");
+  }
+}
+
+function validateDnsServer(raw: unknown, path: string): void {
+  const server = asRecord(raw, path);
+  asIpAddress(server.address, `${path}.address`);
+  optional(
+    (value, valuePath) => asInt(value, valuePath, { min: 0, max: 65535 }),
+    server.port,
+    `${path}.port`,
+  );
+}
+
+function isValidDnsMode(mode: string): boolean {
+  return (
+    mode.length > 0 &&
+    mode.length <= 64 &&
+    /[A-Za-z0-9]/.test(mode) &&
+    /^[A-Za-z0-9._/-]+$/.test(mode)
+  );
+}
+
+function validateDnsObservation(raw: unknown, path: string): void {
+  const observation = asRecord(raw, path);
+  validateDnsScope(observation.scope, `${path}.scope`);
+  const mode = optional(asString, observation.mode, `${path}.mode`);
+  if (mode !== null && !isValidDnsMode(mode)) {
+    fail(`${path}.mode`, 'expected a non-empty resolver mode token');
+  }
+  asArray(observation.servers, `${path}.servers`).forEach((server, i) =>
+    validateDnsServer(server, `${path}.servers[${i}]`),
+  );
+  asStringArray(observation.searchDomains, `${path}.searchDomains`);
+  asStringArray(observation.routingDomains, `${path}.routingDomains`);
+  asSources(observation.sources, `${path}.sources`);
+  asStringArray(observation.notes, `${path}.notes`);
+}
+
+function validateConnectionState(raw: unknown, path: string): void {
+  if (typeof raw === 'string') {
+    asEnum(raw, ['unknown', 'activating', 'activated', 'deactivating', 'deactivated'], path);
+    return;
+  }
+  const record = asRecord(raw, path);
+  asInt(record.other, `${path}.other`, { min: 0, max: 255 });
+}
+
+function validateConnectionObservation(raw: unknown, path: string): void {
+  const observation = asRecord(raw, path);
+  asNonEmptyString(observation.connectionType, `${path}.connectionType`);
+  validateConnectionState(observation.state, `${path}.state`);
+  asArray(observation.devices, `${path}.devices`).forEach((device, i) =>
+    asInt(device, `${path}.devices[${i}]`, { min: 1 }),
+  );
+  if (typeof observation.vpn !== 'boolean') {
+    fail(`${path}.vpn`, 'expected a boolean');
+  }
+  asSources(observation.sources, `${path}.sources`);
+  asStringArray(observation.notes, `${path}.notes`);
+}
+
+function optionalV4Array(value: unknown, path: string): unknown[] | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) {
+    fail(path, 'must be an array, not null; omit the field when not observed');
+  }
+  return asArray(value, path);
+}
+
 function validateSectionOutcome(raw: unknown, path: string): void {
   const outcome = asRecord(raw, path);
   switch (outcome.kind) {
@@ -319,20 +389,25 @@ function validateSectionOutcome(raw: unknown, path: string): void {
       return;
     case 'unsupported':
     case 'notObserved':
+    case 'unavailable':
+    case 'permissionDenied':
       return;
     default:
-      fail(path, `expected an outcome kind of observed, failed, unsupported, or notObserved`);
+      fail(
+        path,
+        'expected an outcome kind of observed, failed, unavailable, permissionDenied, unsupported, or notObserved',
+      );
   }
 }
 
 function validateProvider(raw: unknown, path: string): void {
   const provider = asRecord(raw, path);
-  asEnum(provider.provider, PROVIDER_IDS, `${path}.provider`);
+  asNonEmptyString(provider.provider, `${path}.provider`);
   asEnum(provider.state, PROVIDER_STATES, `${path}.state`);
   for (const [i, section] of asArray(provider.sections, `${path}.sections`).entries()) {
     const sectionPath = `${path}.sections[${i}]`;
     const record = asRecord(section, sectionPath);
-    asEnum(record.section, SECTION_KINDS, `${sectionPath}.section`);
+    asNonEmptyString(record.section, `${sectionPath}.section`);
     validateSectionOutcome(record.outcome, `${sectionPath}.outcome`);
   }
   asStringArray(provider.notes, `${path}.notes`);
@@ -355,10 +430,10 @@ export function parseSnapshot(input: unknown): NetworkSnapshot {
 function parseSnapshotInner(input: unknown): NetworkSnapshot {
   const root = asRecord(input, '$');
   const schema = root.schemaVersion;
-  if (schema !== 1 && schema !== 2 && schema !== 3) {
+  if (schema !== 1 && schema !== 2 && schema !== 3 && schema !== 4) {
     fail(
       '$.schemaVersion',
-      `unsupported schema version ${String(schema)} (expected 1, 2, or 3; this build writes v3)`,
+      `unsupported schema version ${String(schema)} (expected 1, 2, 3, or 4; this build writes v4)`,
     );
   }
   asInt(root.timestampMs, '$.timestampMs', { min: 0 });
@@ -393,6 +468,17 @@ function parseSnapshotInner(input: unknown): NetworkSnapshot {
     validateProvider(raw, `$.providers[${i}]`);
   });
 
+  let dns: unknown[] | undefined;
+  let connections: unknown[] | undefined;
+  if (schema === 4) {
+    dns = optionalV4Array(root.dns, '$.dns');
+    dns?.forEach((raw, i) => validateDnsObservation(raw, `$.dns[${i}]`));
+    connections = optionalV4Array(root.connections, '$.connections');
+    connections?.forEach((raw, i) =>
+      validateConnectionObservation(raw, `$.connections[${i}]`),
+    );
+  }
+
   return {
     schemaVersion: schema,
     timestampMs: root.timestampMs as number,
@@ -406,5 +492,7 @@ function parseSnapshotInner(input: unknown): NetworkSnapshot {
       nextHops: route.nextHops ?? 'single',
     })) as never,
     providers: root.providers as never,
+    ...(dns !== undefined ? { dns: root.dns as never } : {}),
+    ...(connections !== undefined ? { connections: root.connections as never } : {}),
   };
 }

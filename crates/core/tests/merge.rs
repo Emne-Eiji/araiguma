@@ -61,6 +61,8 @@ fn observation(provider: ProviderId, priority: u8) -> ProviderObservation {
         addresses_v6: SectionResult::NotObserved,
         routes_v4: SectionResult::NotObserved,
         routes_v6: SectionResult::NotObserved,
+        dns: SectionResult::NotObserved,
+        connections: SectionResult::NotObserved,
         fidelity_limited: false,
         notes: vec![],
     }
@@ -135,7 +137,7 @@ fn provider_failure_degrades_without_destroying_other_observations() {
         .unwrap();
     assert_eq!(
         netlink_report.state,
-        araiguma_core::provider::ProviderState::Unavailable
+        araiguma_core::provider::ProviderState::Degraded
     );
 }
 

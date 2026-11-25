@@ -22,6 +22,12 @@
         return 'IPv4 routes';
       case 'routesV6':
         return 'IPv6 routes';
+      case 'dns':
+        return 'DNS';
+      case 'connections':
+        return 'Connections';
+      default:
+        return section;
     }
   }
 
@@ -41,6 +47,20 @@
           tone: 'muted',
           title: 'this provider has no way to observe the section in principle',
         };
+      case 'unavailable':
+        return {
+          text: 'unavailable',
+          tone: 'bad',
+          title: 'the service or resource was unavailable for this run',
+        };
+      case 'permissionDenied':
+        return {
+          text: 'permission denied',
+          tone: 'bad',
+          title: 'access was denied by policy',
+        };
+      case 'notObserved':
+        return { text: 'not observed', tone: 'muted', title: 'not attempted in this run' };
       default:
         return { text: 'not observed', tone: 'muted', title: 'not attempted in this run' };
     }

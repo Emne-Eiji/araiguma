@@ -51,7 +51,7 @@ describe('parseSnapshot rejects invalid input loudly', () => {
   });
 
   it('rejects unknown schema versions', () => {
-    expect(() => parseSnapshot({ schemaVersion: 4 })).toThrow(/schema version/);
+    expect(() => parseSnapshot({ schemaVersion: 5 })).toThrow(/schema version/);
     expect(() => parseSnapshot({ schemaVersion: '1' })).toThrow();
   });
 
@@ -78,7 +78,7 @@ describe('parseSnapshot rejects invalid input loudly', () => {
     ).toThrow(/kind/);
   });
 
-  it('rejects unknown provider ids and states', () => {
+  it('accepts unknown non-empty provider ids and rejects empty ids/states', () => {
     const base = {
       schemaVersion: 2,
       timestampMs: 0,
@@ -90,6 +90,12 @@ describe('parseSnapshot rejects invalid input loudly', () => {
       parseSnapshot({
         ...base,
         providers: [{ provider: 'avahi', state: 'available', sections: [], notes: [] }],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      parseSnapshot({
+        ...base,
+        providers: [{ provider: '', state: 'available', sections: [], notes: [] }],
       }),
     ).toThrow(/provider/);
     expect(() =>

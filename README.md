@@ -56,7 +56,7 @@ provider abstraction with six-state health; merge layer; snapshot diffing.
   destroys observations.
 
 **CLI** (`crates/cli`): `araiguma snapshot [--pretty]` (one merged observation,
-schema v3), `araiguma watch` (NDJSON events), `araiguma topology --input`
+schema v4), `araiguma watch` (NDJSON events), `araiguma topology --input`
 (project a snapshot into an evidence-only topology document).
 
 **Shared engine** (`crates/engine`): one observation engine owns providers,

@@ -15,16 +15,16 @@
 use std::net::IpAddr;
 
 use crate::model::{
-    Address, AddressFamily, Interface, IpNet, MacObservation, NextHops, ObservationSource, Route,
-    RT_TABLE_MAIN,
+    Address, AddressFamily, ConnectionObservation, DnsObservation, Interface, IpNet,
+    MacObservation, NextHops, ObservationSource, Route, RT_TABLE_MAIN,
 };
-use crate::provider::{ProviderObservation, ProviderReport};
+use crate::provider::{ProviderObservation, ProviderReport, SectionResult};
 use crate::snapshot::{NetworkSnapshot, SNAPSHOT_SCHEMA_VERSION};
 
 /// Merge provider observations into a snapshot.
 pub fn merge(observations: Vec<ProviderObservation>, timestamp_ms: u64) -> NetworkSnapshot {
     let mut observations = observations;
-    observations.sort_by_key(|o| (o.priority, o.provider));
+    observations.sort_by_key(|o| (o.priority, o.provider.clone()));
 
     let mut interfaces: Vec<Interface> = Vec::new();
     let mut addresses: Vec<Address> = Vec::new();
@@ -129,6 +129,8 @@ pub fn merge(observations: Vec<ProviderObservation>, timestamp_ms: u64) -> Netwo
     routes.sort_by_key(route_sort_key);
 
     let providers: Vec<ProviderReport> = observations.iter().map(|o| o.summarize()).collect();
+    let dns = merged_dns(&observations);
+    let connections = merged_connections(&observations);
 
     NetworkSnapshot {
         schema_version: SNAPSHOT_SCHEMA_VERSION,
@@ -137,6 +139,64 @@ pub fn merge(observations: Vec<ProviderObservation>, timestamp_ms: u64) -> Netwo
         addresses,
         routes,
         providers,
+        dns,
+        connections,
+    }
+}
+
+fn merged_dns(observations: &[ProviderObservation]) -> Option<Vec<DnsObservation>> {
+    let mut items = Vec::new();
+    let mut owner_seen = false;
+    let mut all_observed = true;
+    for observation in observations {
+        match &observation.dns {
+            SectionResult::Observed(observed) => {
+                owner_seen = true;
+                items.extend(observed.iter().cloned());
+            }
+            SectionResult::Unsupported => {}
+            SectionResult::Failed(_)
+            | SectionResult::Unavailable
+            | SectionResult::PermissionDenied
+            | SectionResult::NotObserved => {
+                owner_seen = true;
+                all_observed = false;
+            }
+        }
+    }
+    if !owner_seen || !all_observed {
+        None
+    } else {
+        items.sort();
+        Some(items)
+    }
+}
+
+fn merged_connections(observations: &[ProviderObservation]) -> Option<Vec<ConnectionObservation>> {
+    let mut items = Vec::new();
+    let mut owner_seen = false;
+    let mut all_observed = true;
+    for observation in observations {
+        match &observation.connections {
+            SectionResult::Observed(observed) => {
+                owner_seen = true;
+                items.extend(observed.iter().cloned());
+            }
+            SectionResult::Unsupported => {}
+            SectionResult::Failed(_)
+            | SectionResult::Unavailable
+            | SectionResult::PermissionDenied
+            | SectionResult::NotObserved => {
+                owner_seen = true;
+                all_observed = false;
+            }
+        }
+    }
+    if !owner_seen || !all_observed {
+        None
+    } else {
+        items.sort();
+        Some(items)
     }
 }
 
@@ -184,10 +244,10 @@ fn route_sort_key(route: &Route) -> RouteSortKey {
     )
 }
 
-fn push_unique<T: PartialEq + Copy>(list: &mut Vec<T>, values: &[T]) {
+fn push_unique<T: PartialEq + Clone>(list: &mut Vec<T>, values: &[T]) {
     for value in values {
         if !list.contains(value) {
-            list.push(*value);
+            list.push(value.clone());
         }
     }
 }

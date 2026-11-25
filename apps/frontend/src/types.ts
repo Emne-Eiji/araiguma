@@ -20,7 +20,13 @@ export type RouteViaAddr =
   | { inet6: string }
   | { packet: number[] }
   | { other: { family: number; bytes: number[] } };
-export type ObservationSource = 'netlink' | 'sysfs' | 'procfs';
+export type ObservationSource =
+  | 'netlink'
+  | 'sysfs'
+  | 'procfs'
+  | 'networkManager'
+  | 'systemdResolved'
+  | (string & {});
 
 export type InterfaceKind =
   | 'loopback'
@@ -181,7 +187,12 @@ export interface Route {
   notes: string[];
 }
 
-export type ProviderId = 'netlink' | 'sysfs';
+export type ProviderId =
+  | 'netlink'
+  | 'sysfs'
+  | 'networkManager'
+  | 'systemdResolved'
+  | (string & {});
 
 export type ProviderState =
   | 'notYetObserved'
@@ -196,11 +207,16 @@ export type SectionKind =
   | 'addressesV4'
   | 'addressesV6'
   | 'routesV4'
-  | 'routesV6';
+  | 'routesV6'
+  | 'dns'
+  | 'connections'
+  | (string & {});
 
 export type SectionOutcome =
   | { kind: 'observed'; count: number }
   | { kind: 'failed'; error: string }
+  | { kind: 'unavailable' }
+  | { kind: 'permissionDenied' }
   | { kind: 'unsupported' }
   | { kind: 'notObserved' };
 
@@ -216,6 +232,40 @@ export interface ProviderReport {
   notes: string[];
 }
 
+export type DnsScope = { kind: 'global' } | { kind: 'link'; ifindex: number };
+
+export interface DnsServer {
+  address: string;
+  port?: number;
+}
+
+export interface DnsObservation {
+  scope: DnsScope;
+  mode?: string;
+  servers: DnsServer[];
+  searchDomains: string[];
+  routingDomains: string[];
+  sources: ObservationSource[];
+  notes: string[];
+}
+
+export type ConnectionState =
+  | 'unknown'
+  | 'activating'
+  | 'activated'
+  | 'deactivating'
+  | 'deactivated'
+  | { other: number };
+
+export interface ConnectionObservation {
+  connectionType: string;
+  state: ConnectionState;
+  devices: number[];
+  vpn: boolean;
+  sources: ObservationSource[];
+  notes: string[];
+}
+
 export interface NetworkSnapshot {
   schemaVersion: number;
   timestampMs: number;
@@ -223,6 +273,10 @@ export interface NetworkSnapshot {
   addresses: Address[];
   routes: Route[];
   providers: ProviderReport[];
+  /** Absent means not observed; [] means observed empty. */
+  dns?: DnsObservation[];
+  /** Absent means not observed; [] means observed empty. */
+  connections?: ConnectionObservation[];
 }
 
 // ── Topology documents (mirror of crates/core/src/topology.rs) ────────────

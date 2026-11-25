@@ -153,7 +153,7 @@ describe('snapshot validation: required fields and shapes', () => {
         snapshotWith(
           (d) =>
             (provider(d, 0).sections = [
-              { section: 'telepathy', outcome: { kind: 'observed', count: 0 } },
+              { section: '', outcome: { kind: 'observed', count: 0 } },
             ]),
         ),
       ),
@@ -369,7 +369,7 @@ describe('topology validation: nodes, edges, references', () => {
             from: { interface: { ifindex: 2 } },
             to: { gateway: { address: '192.168.1.1' } },
             edgeKind: 'gatewayRoute',
-            evidence: { observed: { source: 'telepathy' } },
+            evidence: { observed: { source: '' } },
             detail: null,
           },
         ]),
@@ -668,7 +668,7 @@ describe('interface and topology structural rules (WO-03-F / AUD-10)', () => {
     );
   });
 
-  it('the schema version message names the current version (v3)', () => {
+  it('the schema version messages name each contract current version', () => {
     const versioned = topologyWith([], []) as Record<string, unknown>;
     versioned.schemaVersion = 7;
     expect(() => parseTopology(versioned)).toThrow(
@@ -676,6 +676,6 @@ describe('interface and topology structural rules (WO-03-F / AUD-10)', () => {
     );
     expect(() =>
       parseSnapshot(snapshotWith((d) => { d.schemaVersion = 9; })),
-    ).toThrow(/expected 1, 2, or 3; this build writes v3/);
+    ).toThrow(/expected 1, 2, 3, or 4; this build writes v4/);
   });
 });

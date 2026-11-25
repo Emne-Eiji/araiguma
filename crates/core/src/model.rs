@@ -16,11 +16,15 @@
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The provider that produced a piece of network state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+///
+/// Known identities serialize as their exact wire strings. Unknown identities
+/// are preserved verbatim as non-empty strings (`Other(String)`), never as a
+/// tagged enum object. `ProcFs` is an observation source only, not a provider
+/// identity.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ObservationSource {
     /// rtnetlink (the primary structured kernel interface).
     Netlink,
@@ -28,6 +32,129 @@ pub enum ObservationSource {
     SysFs,
     /// procfs (`/proc/net/...`).
     ProcFs,
+    /// NetworkManager D-Bus.
+    NetworkManager,
+    /// systemd-resolved D-Bus.
+    SystemdResolved,
+    /// A source identity this build does not know; preserved verbatim.
+    Other(String),
+}
+
+impl ObservationSource {
+    pub fn as_wire_str(&self) -> &str {
+        match self {
+            Self::Netlink => "netlink",
+            Self::SysFs => "sysfs",
+            Self::ProcFs => "procfs",
+            Self::NetworkManager => "networkManager",
+            Self::SystemdResolved => "systemdResolved",
+            Self::Other(raw) => raw,
+        }
+    }
+}
+
+impl Serialize for ObservationSource {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if self.as_wire_str().is_empty() {
+            return Err(serde::ser::Error::custom(
+                "observation source identity must be a non-empty string",
+            ));
+        }
+        serializer.serialize_str(self.as_wire_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ObservationSource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        if raw.is_empty() {
+            return Err(serde::de::Error::custom(
+                "observation source identity must be a non-empty string",
+            ));
+        }
+        Ok(match raw.as_str() {
+            "netlink" => Self::Netlink,
+            "sysfs" => Self::SysFs,
+            "procfs" => Self::ProcFs,
+            "networkManager" => Self::NetworkManager,
+            "systemdResolved" => Self::SystemdResolved,
+            _ => Self::Other(raw),
+        })
+    }
+}
+
+/// Scope of a DNS configuration observation.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum DnsScope {
+    /// System-wide resolver configuration.
+    Global,
+    /// Resolver configuration attached to one interface ifindex.
+    Link { ifindex: u32 },
+}
+
+/// One observed DNS server endpoint.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DnsServer {
+    pub address: IpAddr,
+    /// Observed port; `None` means the source did not specify one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+}
+
+/// A DNS configuration observation. This is configuration evidence only; it
+/// never proves that name resolution succeeded.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DnsObservation {
+    pub scope: DnsScope,
+    /// Resolver mode as exposed by the source (for example resolved's
+    /// `ResolvConfMode`). `None` means not observed. Unknown non-empty mode
+    /// tokens are preserved; empty or whitespace/control-character values are
+    /// rejected at the document boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    pub servers: Vec<DnsServer>,
+    pub search_domains: Vec<String>,
+    pub routing_domains: Vec<String>,
+    pub sources: Vec<ObservationSource>,
+    pub notes: Vec<String>,
+}
+
+/// NetworkManager active-connection state.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConnectionState {
+    Unknown,
+    Activating,
+    Activated,
+    Deactivating,
+    Deactivated,
+    /// A state value this build does not map; kept verbatim.
+    Other(u8),
+}
+
+/// One observed NetworkManager active connection.
+///
+/// Identity is content-based: display names, UUIDs, D-Bus object paths, and
+/// specific-object identifiers are deliberately excluded.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionObservation {
+    pub connection_type: String,
+    pub state: ConnectionState,
+    /// Resolved device ifindexes, sorted ascending and deduplicated.
+    pub devices: Vec<u32>,
+    pub vpn: bool,
+    pub sources: Vec<ObservationSource>,
+    pub notes: Vec<String>,
 }
 
 /// IP address family.

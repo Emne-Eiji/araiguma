@@ -442,6 +442,8 @@ impl DiscoveryProvider for SysFsProvider {
             addresses_v6,
             routes_v4,
             routes_v6,
+            dns: SectionResult::Unsupported,
+            connections: SectionResult::Unsupported,
             fidelity_limited: true,
             notes,
         }
