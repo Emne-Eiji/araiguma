@@ -8,6 +8,17 @@ mod common;
 
 use std::time::{Duration, Instant};
 
+/// The interface a real NetworkManager service exports on
+/// active-connection objects. Deliberately NOT imported from the production
+/// policy constant (WO-06C-C1): the original mocks keyed their reply tables
+/// on that constant, so mock and implementation repeated the same wrong
+/// interface name and the reads succeeded tautologically.
+const REAL_ACTIVE_CONNECTION_INTERFACE: &str = "org.freedesktop.NetworkManager.Connection.Active";
+
+/// The pre-correction interface name, which real NetworkManager does not
+/// export; kept as a literal for regression tests.
+const LEGACY_ACTIVE_CONNECTION_INTERFACE: &str = "org.freedesktop.NetworkManager.ActiveConnection";
+
 use araiguma_provider_dbus::policy::{
     NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE, NETWORK_MANAGER_DEVICE_INTERFACE,
     NETWORK_MANAGER_DEVICE_PATH_PREFIX, NETWORK_MANAGER_MANAGER_INTERFACE,
@@ -59,19 +70,19 @@ fn nm_replies() -> MockReplies {
         MockReply::Value(zbus::Variant::from("eth0")),
     );
     replies.insert(
-        (NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE, "Devices"),
+        (REAL_ACTIVE_CONNECTION_INTERFACE, "Devices"),
         MockReply::Value(object_paths(std::slice::from_ref(&device))),
     );
     replies.insert(
-        (NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE, "State"),
+        (REAL_ACTIVE_CONNECTION_INTERFACE, "State"),
         MockReply::Value(zbus::Variant::from(2u32)),
     );
     replies.insert(
-        (NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE, "Type"),
+        (REAL_ACTIVE_CONNECTION_INTERFACE, "Type"),
         MockReply::Value(zbus::Variant::from("802-3-ethernet")),
     );
     replies.insert(
-        (NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE, "Vpn"),
+        (REAL_ACTIVE_CONNECTION_INTERFACE, "Vpn"),
         MockReply::Value(zbus::Variant::from(false)),
     );
     replies
@@ -248,6 +259,22 @@ async fn preflight_and_approved_reads_have_exact_wire_shape() {
             .map(|body| body[1].as_str()),
         Some("Interface")
     );
+    // Independent literal (WO-06C-C1): the wire must name the interface real
+    // NetworkManager exports, not whatever the production constant says.
+    assert_eq!(
+        find_get(&calls, "Vpn")
+            .body
+            .as_deref()
+            .map(|body| body[0].as_str()),
+        Some("org.freedesktop.NetworkManager.Connection.Active")
+    );
+    assert_ne!(
+        find_get(&calls, "Vpn")
+            .body
+            .as_deref()
+            .map(|body| body[0].as_str()),
+        Some("org.freedesktop.NetworkManager.ActiveConnection")
+    );
 
     assert!(
         monitor
@@ -279,6 +306,161 @@ async fn preflight_and_approved_reads_have_exact_wire_shape() {
         "application traffic continued after shutdown"
     );
 
+    mock.shutdown().await;
+}
+
+#[tokio::test]
+async fn active_connection_reads_use_the_real_network_manager_interface() {
+    let harness = Harness::start();
+    let monitor = harness.monitor().await;
+    let device = nm_device_path(2);
+    let active = nm_active_connection_path(1);
+
+    // The mock answers ONLY the interface real NetworkManager exports.
+    let mut replies = MockReplies::new();
+    replies.insert(
+        (REAL_ACTIVE_CONNECTION_INTERFACE, "Devices"),
+        MockReply::Value(object_paths(std::slice::from_ref(&device))),
+    );
+    replies.insert(
+        (REAL_ACTIVE_CONNECTION_INTERFACE, "State"),
+        MockReply::Value(zbus::Variant::from(2u32)),
+    );
+    replies.insert(
+        (REAL_ACTIVE_CONNECTION_INTERFACE, "Type"),
+        MockReply::Value(zbus::Variant::from("802-3-ethernet")),
+    );
+    replies.insert(
+        (REAL_ACTIVE_CONNECTION_INTERFACE, "Vpn"),
+        MockReply::Value(zbus::Variant::from(false)),
+    );
+    let mock = MockService::start(Service::NetworkManager, replies).await;
+    monitor.clear();
+
+    let foundation = DbusFoundation::connect(Service::NetworkManager)
+        .await
+        .expect("preflight");
+
+    // All four approved active-connection properties are readable through
+    // the interface the real service exports.
+    let expected_signature = |property: &str| match property {
+        "Devices" => "ao",
+        "State" => "u",
+        "Type" => "s",
+        _ => "b",
+    };
+    for property in ["Devices", "State", "Type", "Vpn"] {
+        let value = foundation
+            .read_property(nm_request(
+                &active,
+                NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+                property,
+            ))
+            .await
+            .unwrap_or_else(|_| panic!("approved property {property}"));
+        assert_eq!(
+            value.value_signature().to_string(),
+            expected_signature(property)
+        );
+    }
+
+    // Every Get that reached the service carried the real interface name.
+    let calls = mock.calls();
+    assert_eq!(calls.len(), 4, "exactly four property reads");
+    for property in ["Devices", "State", "Type", "Vpn"] {
+        let body = calls
+            .iter()
+            .find(|call| {
+                call.member == "Get"
+                    && call.body.as_ref().map(|body| body[1].as_str()) == Some(property)
+            })
+            .unwrap_or_else(|| panic!("no Get for {property}"))
+            .body
+            .as_deref()
+            .expect("Get body");
+        assert_eq!(
+            body[0].as_str(),
+            "org.freedesktop.NetworkManager.Connection.Active"
+        );
+        assert_ne!(
+            body[0].as_str(),
+            "org.freedesktop.NetworkManager.ActiveConnection"
+        );
+    }
+
+    // The monitor observed the same interface on the actual wire messages.
+    for message in monitor.application_calls() {
+        let body = message.body.as_deref().expect("Get body");
+        if body[1].as_str() == "Vpn" {
+            assert_eq!(
+                body[0].as_str(),
+                "org.freedesktop.NetworkManager.Connection.Active"
+            );
+        }
+    }
+
+    // The legacy pre-correction interface is rejected before the wire.
+    for property in ["Devices", "State", "Type", "Vpn"] {
+        assert_eq!(
+            foundation
+                .read_property(nm_request(
+                    &active,
+                    LEGACY_ACTIVE_CONNECTION_INTERFACE,
+                    property
+                ))
+                .await,
+            Err(DbusError::UnsupportedRequest),
+            "legacy interface, property {property}"
+        );
+    }
+
+    // Unapproved properties under the real interface stay rejected.
+    for property in ["Uuid", "Id", "Connection"] {
+        assert_eq!(
+            foundation
+                .read_property(nm_request(
+                    &active,
+                    NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+                    property,
+                ))
+                .await,
+            Err(DbusError::UnsupportedRequest),
+            "unapproved property {property}"
+        );
+    }
+
+    // Malformed active-connection object paths stay rejected.
+    for path in [
+        "/org/freedesktop/NetworkManager/ActiveConnection",
+        "/org/freedesktop/NetworkManager/ActiveConnection/",
+        "/org/freedesktop/NetworkManager/ActiveConnection/01",
+        "/org/freedesktop/NetworkManager/ActiveConnection/1/extra",
+        "/org/freedesktop/NetworkManager/ActiveConnection/1evil",
+        "/org/freedesktop/NetworkManager/ActiveConnection/abc",
+        "/org/freedesktop/NetworkManager/ActiveConnection/-1",
+    ] {
+        assert_eq!(
+            foundation
+                .read_property(nm_request(
+                    path,
+                    NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+                    "State",
+                ))
+                .await,
+            Err(DbusError::UnsupportedRequest),
+            "path {path}"
+        );
+    }
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+        mock.calls().len(),
+        4,
+        "only the four approved reads may reach the service"
+    );
+    monitor.assert_clean(4);
+
+    foundation.shutdown().await.expect("shutdown");
     mock.shutdown().await;
 }
 
@@ -754,15 +936,15 @@ async fn malformed_and_error_replies_map_to_bounded_categories() {
         MockReply::Error("org.freedesktop.DBus.Error.AccessDenied"),
     );
     replies.insert(
-        (NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE, "State"),
+        (REAL_ACTIVE_CONNECTION_INTERFACE, "State"),
         MockReply::Error("org.freedesktop.DBus.Error.ServiceUnknown"),
     );
     replies.insert(
-        (NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE, "Type"),
+        (REAL_ACTIVE_CONNECTION_INTERFACE, "Type"),
         MockReply::Error("org.freedesktop.DBus.Error.UnknownProperty"),
     );
     replies.insert(
-        (NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE, "Vpn"),
+        (REAL_ACTIVE_CONNECTION_INTERFACE, "Vpn"),
         MockReply::Error("org.example.Custom.Error"),
     );
     let mock = MockService::start(Service::NetworkManager, replies).await;

@@ -36,6 +36,13 @@ use common::{
     MockCall, WireMonitor,
 };
 
+/// The interface a real NetworkManager service exports on
+/// active-connection objects. Deliberately NOT imported from the production
+/// policy constant (WO-06C-C1): the original mock reply tables were keyed on
+/// that constant, so mock and implementation repeated the same wrong
+/// interface name and the reads succeeded tautologically.
+const REAL_ACTIVE_CONNECTION_INTERFACE: &str = "org.freedesktop.NetworkManager.Connection.Active";
+
 const WAIT: Duration = Duration::from_secs(3);
 const TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -374,7 +381,7 @@ fn assert_only_approved_gets(calls: &[MockCall]) {
             matches!(
                 body[0].as_str(),
                 NETWORK_MANAGER_MANAGER_INTERFACE
-                    | NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE
+                    | REAL_ACTIVE_CONNECTION_INTERFACE
                     | NETWORK_MANAGER_DEVICE_INTERFACE
             ),
             "unexpected interface in Get body: {}",
@@ -412,28 +419,28 @@ async fn observe_with_state(state: u32) -> ProviderObservation {
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Devices",
         object_paths(&[]),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "State",
         Variant::from(state),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Type",
         Variant::from("802-3-ethernet"),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Vpn",
         Variant::from(false),
     );
@@ -518,28 +525,28 @@ async fn malformed_state_on_one_connection_does_not_fabricate_a_valid_observatio
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Devices",
         object_paths(std::slice::from_ref(&dev)),
     );
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "State",
         Variant::from(2u32),
     );
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Type",
         Variant::from("802-3-ethernet"),
     );
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Vpn",
         Variant::from(false),
     );
@@ -553,28 +560,28 @@ async fn malformed_state_on_one_connection_does_not_fabricate_a_valid_observatio
     insert(
         &mut replies,
         &ac2,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Devices",
         object_paths(&[]),
     );
     insert(
         &mut replies,
         &ac2,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "State",
         Variant::from(256u32),
     );
     insert(
         &mut replies,
         &ac2,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Type",
         Variant::from("802-3-ethernet"),
     );
     insert(
         &mut replies,
         &ac2,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Vpn",
         Variant::from(false),
     );
@@ -607,6 +614,119 @@ async fn malformed_state_on_one_connection_does_not_fabricate_a_valid_observatio
 }
 
 #[tokio::test]
+async fn provider_reads_active_connections_through_the_real_interface() {
+    let harness = Harness::start();
+    let monitor = harness.monitor().await;
+    let fixture = SysfsFixture::new(&[("eth0", 2)]);
+    let ac = nm_active_connection_path(1);
+    let dev = nm_device_path(2);
+    let mut replies = PathReplies::new();
+    insert(
+        &mut replies,
+        NETWORK_MANAGER_MANAGER_PATH,
+        NETWORK_MANAGER_MANAGER_INTERFACE,
+        "ActiveConnections",
+        object_paths(std::slice::from_ref(&ac)),
+    );
+    insert(
+        &mut replies,
+        &ac,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
+        "Devices",
+        object_paths(std::slice::from_ref(&dev)),
+    );
+    insert(
+        &mut replies,
+        &ac,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
+        "State",
+        Variant::from(2u32),
+    );
+    insert(
+        &mut replies,
+        &ac,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
+        "Type",
+        Variant::from("802-3-ethernet"),
+    );
+    insert(
+        &mut replies,
+        &ac,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
+        "Vpn",
+        Variant::from(false),
+    );
+    insert(
+        &mut replies,
+        &dev,
+        NETWORK_MANAGER_DEVICE_INTERFACE,
+        "Interface",
+        Variant::from("eth0"),
+    );
+    // The mock answers ONLY the real interface; a request naming the legacy
+    // interface would find no entry and reply UnknownProperty.
+    let mock = PathMockService::start(replies).await;
+    monitor.clear();
+
+    let mut provider = NetworkManagerProvider::with_sys_root_and_timeout(&fixture.root, TIMEOUT);
+    let observation = provider.observe().await;
+    let connections = observed(&observation.connections);
+    assert_eq!(connections.len(), 1);
+    assert_eq!(connections[0].connection_type, "802-3-ethernet");
+    assert_eq!(connections[0].state, ConnectionState::Activated);
+    assert_eq!(connections[0].devices, vec![2]);
+    assert!(!connections[0].vpn);
+    assert_eq!(observation.state(), ProviderState::Available);
+
+    // The production constant must be exactly the independently written
+    // real-interface literal; the provider's own requests therefore use it.
+    let production_interface = NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE;
+    assert_eq!(production_interface, REAL_ACTIVE_CONNECTION_INTERFACE);
+
+    // Every active-connection Get that reached the service carried the real
+    // interface name, character for character.
+    let calls = mock.calls();
+    for property in ["Devices", "State", "Type", "Vpn"] {
+        let body = calls
+            .iter()
+            .find(|call| {
+                call.member == "Get"
+                    && call.path == ac
+                    && call.body.as_ref().map(|body| body[1].as_str()) == Some(property)
+            })
+            .unwrap_or_else(|| panic!("no Get for {property}"))
+            .body
+            .as_deref()
+            .expect("Get body");
+        assert_eq!(
+            body[0].as_str(),
+            "org.freedesktop.NetworkManager.Connection.Active"
+        );
+    }
+    assert!(calls.iter().all(|call| {
+        call.body.as_deref().map(|body| body[0].as_str())
+            != Some("org.freedesktop.NetworkManager.ActiveConnection")
+    }));
+
+    // The independent monitor saw the real interface on the actual wire and
+    // never saw the legacy one.
+    let application = monitor.application_calls();
+    assert!(application.iter().any(|message| {
+        message.body.as_deref().map(|body| body[0].as_str())
+            == Some("org.freedesktop.NetworkManager.Connection.Active")
+    }));
+    assert!(application.iter().all(|message| {
+        message.body.as_deref().map(|body| body[0].as_str())
+            != Some("org.freedesktop.NetworkManager.ActiveConnection")
+    }));
+
+    assert_only_approved_gets(&calls);
+    monitor.assert_clean(6);
+
+    mock.shutdown().await;
+}
+
+#[tokio::test]
 async fn available_service_discovers_connections_devices_vpn_and_state() {
     let harness = Harness::start();
     let monitor = harness.monitor().await;
@@ -626,28 +746,28 @@ async fn available_service_discovers_connections_devices_vpn_and_state() {
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Devices",
         object_paths(std::slice::from_ref(&dev2)),
     );
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "State",
         Variant::from(2u32),
     );
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Type",
         Variant::from("802-3-ethernet"),
     );
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Vpn",
         Variant::from(false),
     );
@@ -661,28 +781,28 @@ async fn available_service_discovers_connections_devices_vpn_and_state() {
     insert(
         &mut replies,
         &ac2,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Devices",
         object_paths(std::slice::from_ref(&dev3)),
     );
     insert(
         &mut replies,
         &ac2,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "State",
         Variant::from(1u32),
     );
     insert(
         &mut replies,
         &ac2,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Type",
         Variant::from("vpn"),
     );
     insert(
         &mut replies,
         &ac2,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Vpn",
         Variant::from(true),
     );
@@ -809,28 +929,28 @@ async fn multiple_and_duplicate_content_observations_are_preserved() {
         insert(
             &mut replies,
             path,
-            NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+            REAL_ACTIVE_CONNECTION_INTERFACE,
             "Devices",
             object_paths(std::slice::from_ref(&dev)),
         );
         insert(
             &mut replies,
             path,
-            NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+            REAL_ACTIVE_CONNECTION_INTERFACE,
             "State",
             Variant::from(2u32),
         );
         insert(
             &mut replies,
             path,
-            NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+            REAL_ACTIVE_CONNECTION_INTERFACE,
             "Type",
             Variant::from("802-3-ethernet"),
         );
         insert(
             &mut replies,
             path,
-            NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+            REAL_ACTIVE_CONNECTION_INTERFACE,
             "Vpn",
             Variant::from(false),
         );
@@ -1141,28 +1261,28 @@ async fn partial_connection_read_keeps_successful_observations() {
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Devices",
         object_paths(std::slice::from_ref(&dev)),
     );
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "State",
         Variant::from(2u32),
     );
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Type",
         Variant::from("802-3-ethernet"),
     );
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Vpn",
         Variant::from(false),
     );
@@ -1176,21 +1296,21 @@ async fn partial_connection_read_keeps_successful_observations() {
     insert(
         &mut replies,
         &ac2,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Devices",
         object_paths(&[]),
     );
     insert(
         &mut replies,
         &ac2,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "State",
         Variant::from(2u32),
     );
     insert(
         &mut replies,
         &ac2,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Type",
         Variant::from("802-3-ethernet"),
     );
@@ -1237,28 +1357,28 @@ async fn unresolved_device_is_reported_without_fabricating_an_ifindex() {
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Devices",
         object_paths(std::slice::from_ref(&dev)),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "State",
         Variant::from(2u32),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Type",
         Variant::from("802-3-ethernet"),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Vpn",
         Variant::from(false),
     );
@@ -1308,28 +1428,28 @@ async fn ip_interface_is_a_fallback_only_when_interface_is_absent() {
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Devices",
         object_paths(std::slice::from_ref(&dev)),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "State",
         Variant::from(2u32),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Type",
         Variant::from("802-3-ethernet"),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Vpn",
         Variant::from(false),
     );
@@ -1375,28 +1495,28 @@ async fn empty_connection_type_is_a_partial_read_not_an_observed_item() {
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Devices",
         object_paths(&[]),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "State",
         Variant::from(2u32),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Type",
         Variant::from(""),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Vpn",
         Variant::from(false),
     );
@@ -1433,28 +1553,28 @@ async fn incorrect_connection_signature_is_a_partial_read() {
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Devices",
         object_paths(std::slice::from_ref(&dev)),
     );
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "State",
         Variant::from(2u32),
     );
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Type",
         Variant::from("802-3-ethernet"),
     );
     insert(
         &mut replies,
         &ac1,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Vpn",
         Variant::from(false),
     );
@@ -1468,14 +1588,14 @@ async fn incorrect_connection_signature_is_a_partial_read() {
     insert(
         &mut replies,
         &ac2,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Devices",
         object_paths(&[]),
     );
     insert(
         &mut replies,
         &ac2,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "State",
         Variant::from("activated"),
     );
@@ -1514,28 +1634,28 @@ async fn v4_serialization_round_trips_the_provider_observation() {
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Devices",
         object_paths(std::slice::from_ref(&dev)),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "State",
         Variant::from(4u32),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Type",
         Variant::from("vpn"),
     );
     insert(
         &mut replies,
         &ac,
-        NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+        REAL_ACTIVE_CONNECTION_INTERFACE,
         "Vpn",
         Variant::from(true),
     );

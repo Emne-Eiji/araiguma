@@ -42,8 +42,13 @@ pub const SYSTEMD_RESOLVED_MANAGER_PATH: &str = "/org/freedesktop/resolve1";
 
 pub const NETWORK_MANAGER_MANAGER_INTERFACE: &str = "org.freedesktop.NetworkManager";
 pub const NETWORK_MANAGER_DEVICE_INTERFACE: &str = "org.freedesktop.NetworkManager.Device";
+/// The interface real NetworkManager exports on active-connection objects
+/// at `/org/freedesktop/NetworkManager/ActiveConnection/{N}`
+/// (WO-06C-C1; previously misrecorded as
+/// `org.freedesktop.NetworkManager.ActiveConnection`, which real
+/// NetworkManager does not export).
 pub const NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE: &str =
-    "org.freedesktop.NetworkManager.ActiveConnection";
+    "org.freedesktop.NetworkManager.Connection.Active";
 pub const SYSTEMD_RESOLVED_MANAGER_INTERFACE: &str = "org.freedesktop.resolve1.Manager";
 
 /// A property request exactly as a caller wants to make it.
@@ -265,6 +270,18 @@ mod tests {
     };
     use crate::error::DbusError;
 
+    /// The interface a real NetworkManager service exports on
+    /// active-connection objects, written independently of the production
+    /// constant (WO-06C-C1) so the policy and the mocks cannot repeat the
+    /// same interface mistake without detection.
+    const REAL_ACTIVE_CONNECTION_INTERFACE: &str =
+        "org.freedesktop.NetworkManager.Connection.Active";
+
+    /// The pre-correction interface name, which real NetworkManager does not
+    /// export; retained as a literal so its rejection is regression-tested.
+    const LEGACY_ACTIVE_CONNECTION_INTERFACE: &str =
+        "org.freedesktop.NetworkManager.ActiveConnection";
+
     fn nm<'a>(path: &'a str, interface: &'a str, property: &'a str) -> PropertyRequest<'a> {
         PropertyRequest::new(Service::NetworkManager, path, interface, property)
     }
@@ -295,6 +312,30 @@ mod tests {
                 .expect("approved device property");
             assert_eq!(approved.interface(), NETWORK_MANAGER_DEVICE_INTERFACE);
             assert_eq!(approved.property(), property);
+        }
+    }
+
+    #[test]
+    fn active_connection_interface_is_the_real_network_manager_interface() {
+        assert_eq!(
+            NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+            REAL_ACTIVE_CONNECTION_INTERFACE
+        );
+        assert_ne!(
+            NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+            LEGACY_ACTIVE_CONNECTION_INTERFACE
+        );
+    }
+
+    #[test]
+    fn legacy_active_connection_interface_is_rejected() {
+        let path = format!("{NETWORK_MANAGER_ACTIVE_CONNECTION_PATH_PREFIX}7");
+        for property in ["Devices", "State", "Type", "Vpn"] {
+            assert_eq!(
+                approve(nm(&path, LEGACY_ACTIVE_CONNECTION_INTERFACE, property)),
+                Err(DbusError::UnsupportedRequest),
+                "property {property}"
+            );
         }
     }
 
@@ -504,6 +545,8 @@ mod tests {
             "SpecificObject",
             "VpnType",
             "vpn-type",
+            "Uuid",
+            "Id",
         ] {
             assert_eq!(
                 approve(nm(
@@ -513,6 +556,30 @@ mod tests {
                 )),
                 Err(DbusError::UnsupportedRequest),
                 "property {property}"
+            );
+        }
+    }
+
+    #[test]
+    fn active_connection_object_path_is_strict() {
+        for path in [
+            "/org/freedesktop/NetworkManager/ActiveConnection",
+            "/org/freedesktop/NetworkManager/ActiveConnection/",
+            "/org/freedesktop/NetworkManager/ActiveConnection/01",
+            "/org/freedesktop/NetworkManager/ActiveConnection/1/extra",
+            "/org/freedesktop/NetworkManager/ActiveConnection/1evil",
+            "/org/freedesktop/NetworkManager/ActiveConnection/abc",
+            "/org/freedesktop/NetworkManager/ActiveConnection/-1",
+            "/org/freedesktop/NetworkManager/ActiveConnection/ 1",
+        ] {
+            assert_eq!(
+                approve(nm(
+                    path,
+                    NETWORK_MANAGER_ACTIVE_CONNECTION_INTERFACE,
+                    "State",
+                )),
+                Err(DbusError::UnsupportedRequest),
+                "path {path}"
             );
         }
     }

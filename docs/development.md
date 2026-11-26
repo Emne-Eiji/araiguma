@@ -88,7 +88,11 @@ The suite asserts preflight ordering, `NO_AUTO_START` on every application
 call, absence of `GetAll`/`Set`/`Introspect`/settings/secrets/enumeration,
 approved reply signatures, exact signal rules and sender pinning, bounded
 timeouts and error categories, failure without activation when a service is
-absent or disappears, and connection shutdown.
+absent or disappears, and connection shutdown. Since WO-06C-C1 it also
+asserts the real active-connection interface
+(`org.freedesktop.NetworkManager.Connection.Active`) against an independently
+written literal on the wire, and rejects the legacy
+`org.freedesktop.NetworkManager.ActiveConnection` interface before the wire.
 
 ## NetworkManager provider tests
 
@@ -105,7 +109,11 @@ The suite covers construction, available and absent services, active
 connection discovery, device/interface mapping, VPN/state, empty and
 duplicate results, approved signals, partial and unresolved reads, permission
 denial, timeout, malformed replies, stale-data prevention, v4 serialization,
-and diagnostic privacy.
+and diagnostic privacy. Since WO-06C-C1 it also proves the provider reads
+active connections through the real NetworkManager interface
+(`org.freedesktop.NetworkManager.Connection.Active`, verified against an
+independently written literal on the wire), never the legacy
+`org.freedesktop.NetworkManager.ActiveConnection` name.
 
 ## systemd-resolved provider tests
 

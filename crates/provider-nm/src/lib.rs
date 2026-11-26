@@ -4,7 +4,10 @@
 //!
 //! The provider observes exactly the approved WO-06C surface:
 //!
-//! * active connections (`org.freedesktop.NetworkManager.ActiveConnections`),
+//! * the manager's `ActiveConnections` list, and each active connection's
+//!   `Devices`, `State`, `Type`, and `Vpn` properties on the interface real
+//!   NetworkManager exports for active connections
+//!   (`org.freedesktop.NetworkManager.Connection.Active`; WO-06C-C1),
 //! * the device/interface mapping needed to resolve each active connection's
 //!   devices to kernel ifindexes, and
 //! * each active connection's state, type, and VPN boolean.

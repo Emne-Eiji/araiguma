@@ -246,7 +246,7 @@ The provider reads only:
 
 - manager `ActiveConnections` (`ao`);
 - per active connection `Devices` (`ao`), `State` (`u`), `Type` (`s`), and
-  `Vpn` (`b`);
+  `Vpn` (`b`) on `org.freedesktop.NetworkManager.Connection.Active`;
 - per device `Interface` (`s`), falling back to `IpInterface` (`s`) only when
   `Interface` is absent or empty.
 
@@ -278,6 +278,53 @@ tree. It verifies the approved request set, `NO_AUTO_START`, signal
 subscription and sender pinning, empty versus unobserved results,
 duplicates, partial reads, unresolved devices, timeouts, malformed
 replies, stale-data prevention, v4 serialization, and diagnostic privacy.
+
+### WO-06C-C1 corrective amendment (2026-11-26)
+
+The original WO-06C allow-list constant named the active-connection
+interface `org.freedesktop.NetworkManager.ActiveConnection`. Real
+NetworkManager services export active-connection objects under
+`org.freedesktop.NetworkManager.Connection.Active` instead; the old name is
+not exported at all, so every `Properties.Get` for `Devices`, `State`,
+`Type`, or `Vpn` on an active connection would have failed against the
+real service.
+
+The correction replaces the interface name in the allow-list constant
+(`crates/provider-dbus/src/policy.rs`) and therefore in every
+active-connection property request the provider issues. The
+object-path restrictions (`/org/freedesktop/NetworkManager/ActiveConnection/{N}`
+with a canonical numeric suffix), the four approved properties, their
+signatures (`ao`, `u`, `s`, `b`), `Properties.Get`-only enforcement,
+`NO_AUTO_START`, `CacheProperties::No`, ownership preflight, signal
+handling, and all prohibitions on activation, enumeration, setters,
+`GetAll`, `Set`, `GetManagedObjects`, `Introspect`, `GetSettings`, and
+`GetSecrets` are unchanged.
+
+The original private-bus mocks did not detect the defect because their
+reply tables were keyed by the same production constant, so mock and
+implementation repeated the identical wrong interface name and the reads
+succeeded tautologically. The corrected mocks key on an independently
+written literal (`org.freedesktop.NetworkManager.Connection.Active`), and
+regression tests now assert the production constant against that literal,
+reject the legacy interface name before the wire, reject unapproved
+properties and malformed paths, and verify the interface name on the
+actual wire messages. A mutation check (reverting the constant to the
+legacy value) fails the policy contract tests, the provider-dbus wire
+test, and the provider-nm observation test.
+
+Affected files: `crates/provider-dbus/src/policy.rs`,
+`crates/provider-dbus/tests/private_bus.rs`,
+`crates/provider-nm/src/lib.rs`,
+`crates/provider-nm/tests/private_bus.rs`, and this document.
+
+The historical design record (`docs/design/prompt-03/…`) still names the
+pre-correction interface together with a wider property set that the
+implemented policy never adopted; it is preserved as history and superseded
+by this amendment. The original WO-06C implementation and acceptance
+history remain recorded; this amendment supersedes only the
+active-connection interface name and its directly affected tests and
+mocks. Real Ubuntu 24.04 host compatibility remains unverified until
+WO-06F is completed; this amendment does not claim WO-06F passage.
 
 ## systemd-resolved provider (WO-06D)
 
