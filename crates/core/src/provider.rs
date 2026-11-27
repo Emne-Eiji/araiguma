@@ -35,6 +35,24 @@ impl ProviderId {
             Self::Other(raw) => raw,
         }
     }
+
+    /// The single v4 report section this provider owns exclusively.
+    ///
+    /// WO-06 assigns exactly one owning provider per optional section:
+    /// systemd-resolved owns `dns`, NetworkManager owns `connections`.
+    /// Baseline providers own the five universal sections collectively, so
+    /// they have no single exclusive section and return `None`; unknown
+    /// identities are not content-validated and also return `None`.
+    ///
+    /// This is the ownership declaration shared by report validation and
+    /// the engine's pre-observation placeholders, so the two cannot drift.
+    pub fn owned_optional_section(&self) -> Option<SectionKind> {
+        match self {
+            Self::NetworkManager => Some(SectionKind::Connections),
+            Self::SystemdResolved => Some(SectionKind::Dns),
+            Self::Netlink | Self::SysFs | Self::Other(_) => None,
+        }
+    }
 }
 
 impl Serialize for ProviderId {

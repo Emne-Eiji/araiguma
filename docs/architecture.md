@@ -143,6 +143,11 @@ and then by ifindex; connection observations sort by connection type,
 state, devices, and VPN flag. Duplicate identical observations are kept.
 DNS and connection observations never create topology nodes or edges.
 
+The ownership matrix is declared once, in `ProviderId::owned_optional_section()`,
+and is used by both the v4 report validator and the engine's
+pre-observation placeholder. It is a property of the provider identity,
+never of a report index or an array position.
+
 Future providers (systemd-networkd) implement the
 same trait at their own priority; nothing in the pipeline assumes a specific
 provider set.
@@ -408,6 +413,15 @@ waits for optional D-Bus work. A successful optional observation replaces
 its placeholder; a successful empty observation remains `Some([])`; a
 failed, unavailable, denied, or malformed refresh removes stale optional
 data from the merged document.
+
+A placeholder preserves the ownership matrix rather than reporting one
+uniform outcome. The section the optional provider owns is `NotObserved`
+("not attempted yet"), while every section it does not own is
+`Unsupported` ("not ours to report"). The opening document is therefore
+valid at the v4 report boundary before the first optional poll, and the
+desktop can project a topology immediately after construction without
+waiting for — or triggering — optional D-Bus work (WO-07).
+
 
 Optional providers are refreshed independently on the authorized 30 s
 poll cadence (RD-08). The existing 150 ms change debounce and 5 s shutdown

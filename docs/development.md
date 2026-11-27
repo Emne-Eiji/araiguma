@@ -140,6 +140,15 @@ duplicate rejection, baseline-only opening snapshots, stable
 `NotYetObserved` reports, optional success/empty/failure replacement,
 disappearance/recovery, baseline isolation, event delivery, and shutdown.
 
+`crates/engine/tests/startup_validation.rs` covers the startup boundary
+(WO-07): the opening document validates as a v4 provider report, immediate
+topology projection succeeds before any optional observation, the snapshot
+and topology paths agree on ownership, the first optional refresh keeps the
+document valid, and the distinct outcomes (`NotObserved`, `Unsupported`,
+`Observed([])`, a non-empty observation, `Unavailable`, `Failed`) stay
+distinct. The placeholder reports the owned section as `NotObserved` and
+every non-owned section as `Unsupported`.
+
 ```sh
 cargo test -p araiguma-engine
 ```

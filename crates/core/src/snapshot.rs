@@ -198,7 +198,7 @@ impl NetworkSnapshot {
             let path = format!("$.providers[{index}]");
             match &report.provider {
                 ProviderId::NetworkManager => {
-                    self.validate_known_sections(index, report, SectionKind::Connections)?;
+                    self.validate_known_sections(index, report)?;
                     validate_notes(
                         &report.notes,
                         NETWORK_MANAGER_NOTES,
@@ -207,7 +207,7 @@ impl NetworkSnapshot {
                     validate_failed_codes(report, &path)?;
                 }
                 ProviderId::SystemdResolved => {
-                    self.validate_known_sections(index, report, SectionKind::Dns)?;
+                    self.validate_known_sections(index, report)?;
                     validate_notes(
                         &report.notes,
                         SYSTEMD_RESOLVED_NOTES,
@@ -313,8 +313,8 @@ impl NetworkSnapshot {
         &self,
         provider_index: usize,
         report: &ProviderReport,
-        owned: SectionKind,
     ) -> Result<(), String> {
+        let owned = report.provider.owned_optional_section();
         let known = SectionKind::known_all();
         for section in known {
             let count = report
@@ -335,7 +335,9 @@ impl NetworkSnapshot {
             if !is_known {
                 continue;
             }
-            if entry.section != owned && !matches!(entry.outcome, SectionOutcome::Unsupported) {
+            if owned.as_ref() != Some(&entry.section)
+                && !matches!(entry.outcome, SectionOutcome::Unsupported)
+            {
                 return Err(format!(
                     "$.providers[{provider_index}].sections[{section_index}].outcome must be unsupported for a non-owned section"
                 ));

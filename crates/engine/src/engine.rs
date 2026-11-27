@@ -18,7 +18,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use serde::{Deserialize, Serialize};
 
-use araiguma_core::provider::{DiscoveryProvider, ProviderId, ProviderObservation, SectionResult};
+use araiguma_core::provider::{
+    DiscoveryProvider, ProviderId, ProviderObservation, SectionKind, SectionResult,
+};
 use araiguma_core::snapshot::NetworkEvent;
 use araiguma_core::{diff_snapshots, merge, NetworkSnapshot};
 use araiguma_netlink::NetlinkProvider;
@@ -578,18 +580,37 @@ fn is_optional(id: ProviderId) -> bool {
 }
 
 fn not_yet_observed(provider: &dyn DiscoveryProvider) -> ProviderObservation {
+    let id = provider.id();
+    let owned = id.owned_optional_section();
+    // The placeholder must preserve the report ownership matrix: the
+    // section this optional provider owns is not observed yet, while every
+    // section it does not own is unsupported. Reporting `NotObserved` for a
+    // non-owned section conflates "not attempted" with "not ours" and makes
+    // the opening document invalid at the v4 report boundary (WO-07).
     ProviderObservation {
-        provider: provider.id(),
+        provider: id,
         priority: provider.priority(),
-        interfaces: SectionResult::NotObserved,
-        addresses_v4: SectionResult::NotObserved,
-        addresses_v6: SectionResult::NotObserved,
-        routes_v4: SectionResult::NotObserved,
-        routes_v6: SectionResult::NotObserved,
-        dns: SectionResult::NotObserved,
-        connections: SectionResult::NotObserved,
+        interfaces: placeholder_section(owned.as_ref(), SectionKind::Interfaces),
+        addresses_v4: placeholder_section(owned.as_ref(), SectionKind::AddressesV4),
+        addresses_v6: placeholder_section(owned.as_ref(), SectionKind::AddressesV6),
+        routes_v4: placeholder_section(owned.as_ref(), SectionKind::RoutesV4),
+        routes_v6: placeholder_section(owned.as_ref(), SectionKind::RoutesV6),
+        dns: placeholder_section(owned.as_ref(), SectionKind::Dns),
+        connections: placeholder_section(owned.as_ref(), SectionKind::Connections),
         fidelity_limited: false,
         notes: Vec::new(),
+    }
+}
+
+fn placeholder_section<T>(owned: Option<&SectionKind>, section: SectionKind) -> SectionResult<T> {
+    match owned {
+        // A provider that declares no owned section has nothing to report
+        // yet. Keeping every section `NotObserved` preserves that meaning
+        // and lets the report boundary reject the shape, instead of
+        // silently claiming the provider is "not supported".
+        None => SectionResult::NotObserved,
+        Some(owned) if *owned == section => SectionResult::NotObserved,
+        Some(_) => SectionResult::Unsupported,
     }
 }
 
@@ -603,7 +624,7 @@ mod tests {
     use crate::change_feed::{debounce, ChangeFeed, FakeFeed};
     use araiguma_core::model::{DnsObservation, DnsScope, ObservationSource};
     use araiguma_core::provider::{
-        ProviderId, ProviderObservation, ProviderState, SectionOutcome, SectionResult,
+        ProviderId, ProviderObservation, ProviderState, SectionKind, SectionOutcome, SectionResult,
     };
     use araiguma_netlink::Signal;
     use std::collections::VecDeque;
@@ -1154,12 +1175,18 @@ mod tests {
             .expect("snapshot");
         assert_eq!(observes.load(Ordering::SeqCst), 0);
         assert!(document.dns.is_none());
+        document
+            .validate_v4_reports()
+            .expect("initial report must validate before optional polling");
         let report = report_for(&document, &ProviderId::SystemdResolved);
         assert_eq!(report.state, ProviderState::NotYetObserved);
-        assert!(report
-            .sections
-            .iter()
-            .all(|section| { matches!(section.outcome, SectionOutcome::NotObserved) }));
+        for section in &report.sections {
+            if section.section == SectionKind::Dns {
+                assert!(matches!(section.outcome, SectionOutcome::NotObserved));
+            } else {
+                assert!(matches!(section.outcome, SectionOutcome::Unsupported));
+            }
+        }
 
         gate.notify_one();
         let envelope = engine
