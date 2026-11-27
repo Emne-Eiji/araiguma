@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "timestampMs": 1765824000000,
   "interfaces": [
     {
@@ -541,6 +541,18 @@
             "kind": "observed",
             "count": 3
           }
+        },
+        {
+          "section": "dns",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "connections",
+          "outcome": {
+            "kind": "unsupported"
+          }
         }
       ],
       "notes": []
@@ -582,6 +594,18 @@
             "kind": "observed",
             "count": 3
           }
+        },
+        {
+          "section": "dns",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "connections",
+          "outcome": {
+            "kind": "unsupported"
+          }
         }
       ],
       "notes": [
@@ -589,6 +613,236 @@
         "/proc/net/if_inet6 exposes the address scope and IFA_F flag bits only; address labels are not available from procfs",
         "route fields protocol/scope/type are not available from /proc/net/route"
       ]
+    },
+    {
+      "provider": "systemdResolved",
+      "state": "available",
+      "sections": [
+        {
+          "section": "interfaces",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "addressesV4",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "addressesV6",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "routesV4",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "routesV6",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "dns",
+          "outcome": {
+            "kind": "observed",
+            "count": 3
+          }
+        },
+        {
+          "section": "connections",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        }
+      ],
+      "notes": []
+    },
+    {
+      "provider": "networkManager",
+      "state": "available",
+      "sections": [
+        {
+          "section": "interfaces",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "addressesV4",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "addressesV6",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "routesV4",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "routesV6",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "dns",
+          "outcome": {
+            "kind": "unsupported"
+          }
+        },
+        {
+          "section": "connections",
+          "outcome": {
+            "kind": "observed",
+            "count": 5
+          }
+        }
+      ],
+      "notes": [
+        "pollingAndApprovedSignals"
+      ]
+    }
+  ],
+  "dns": [
+    {
+      "scope": {
+        "kind": "global"
+      },
+      "mode": "stub",
+      "servers": [
+        {
+          "address": "192.168.1.1",
+          "port": 53
+        },
+        {
+          "address": "1.1.1.1"
+        }
+      ],
+      "searchDomains": [
+        "lan"
+      ],
+      "routingDomains": [
+        "~."
+      ],
+      "sources": [
+        "systemdResolved"
+      ],
+      "notes": []
+    },
+    {
+      "scope": {
+        "kind": "link",
+        "ifindex": 2
+      },
+      "servers": [
+        {
+          "address": "192.168.1.1",
+          "port": 53
+        }
+      ],
+      "searchDomains": [
+        "lan"
+      ],
+      "routingDomains": [],
+      "sources": [
+        "systemdResolved"
+      ],
+      "notes": []
+    },
+    {
+      "scope": {
+        "kind": "link",
+        "ifindex": 3
+      },
+      "servers": [
+        {
+          "address": "192.168.1.1"
+        }
+      ],
+      "searchDomains": [],
+      "routingDomains": [
+        "~lan"
+      ],
+      "sources": [
+        "systemdResolved"
+      ],
+      "notes": []
+    }
+  ],
+  "connections": [
+    {
+      "connectionType": "802-3-ethernet",
+      "state": "activated",
+      "devices": [
+        2
+      ],
+      "vpn": false,
+      "sources": [
+        "networkManager"
+      ],
+      "notes": []
+    },
+    {
+      "connectionType": "802-11-wireless",
+      "state": "activated",
+      "devices": [
+        3
+      ],
+      "vpn": false,
+      "sources": [
+        "networkManager"
+      ],
+      "notes": []
+    },
+    {
+      "connectionType": "wireguard",
+      "state": "activated",
+      "devices": [
+        10
+      ],
+      "vpn": true,
+      "sources": [
+        "networkManager"
+      ],
+      "notes": []
+    },
+    {
+      "connectionType": "bridge",
+      "state": "deactivated",
+      "devices": [
+        5
+      ],
+      "vpn": false,
+      "sources": [
+        "networkManager"
+      ],
+      "notes": []
+    },
+    {
+      "connectionType": "dummy",
+      "state": "unknown",
+      "devices": [
+        11
+      ],
+      "vpn": false,
+      "sources": [
+        "networkManager"
+      ],
+      "notes": []
     }
   ]
 }

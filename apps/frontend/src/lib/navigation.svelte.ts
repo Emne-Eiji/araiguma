@@ -1,5 +1,7 @@
-// Application navigation (WO-04 Stage A): the six stable, identifiable
-// sections and a destination API.
+// Application navigation (WO-04 Stage A; extended by WO-08): the stable,
+// identifiable sections and a destination API. WO-08 adds the two optional
+// observation surfaces (DNS and connections) that the v4 snapshot contract
+// already carries.
 //
 // TRAY-COMPATIBILITY FOUNDATION (WO-TRAY-01 future, context only): a future
 // tray/notification layer needs (a) stable navigation destinations, (b) the
@@ -22,6 +24,8 @@ export type SectionId =
   | 'topology'
   | 'interfaces'
   | 'routes'
+  | 'dns'
+  | 'connections'
   | 'providers'
   | 'documents';
 
@@ -30,6 +34,8 @@ export const SECTIONS: readonly SectionId[] = [
   'topology',
   'interfaces',
   'routes',
+  'dns',
+  'connections',
   'providers',
   'documents',
 ];
@@ -68,6 +74,18 @@ export const SECTION_META: Record<SectionId, SectionMeta> = {
     label: 'Routes & Gateways',
     blurb: 'The route tables, gateways, and next hops exactly as observed',
     testid: 'nav-routes',
+  },
+  dns: {
+    id: 'dns',
+    label: 'DNS Configuration',
+    blurb: 'Resolver configuration evidence by scope — never a resolution claim',
+    testid: 'nav-dns',
+  },
+  connections: {
+    id: 'connections',
+    label: 'Connections',
+    blurb: 'NetworkManager connection objects — not socket or flow telemetry',
+    testid: 'nav-connections',
   },
   providers: {
     id: 'providers',

@@ -13,7 +13,7 @@
 
   --text-primary: #e8eaef;
   --text-secondary: #9aa2b1;
-  --text-muted: #667082;
+  --text-muted: #8b95a5;
 
   --accent: #4cc9e8;
   --accent-blue: #6d9eeb;
@@ -79,6 +79,20 @@ button {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: var(--radius-s);
+}
+
+/* WO-08: honor the user's reduced-motion preference. Every transition and
+   animation in the observability views is cosmetic; under reduce they are
+   collapsed to a single frame so state changes never rely on motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 .sr-only {

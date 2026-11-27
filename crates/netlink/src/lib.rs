@@ -83,6 +83,8 @@ fn failed_observation(error: &str) -> ProviderObservation {
         addresses_v6: SectionResult::Failed(error.to_string()),
         routes_v4: SectionResult::Failed(error.to_string()),
         routes_v6: SectionResult::Failed(error.to_string()),
+        dns: SectionResult::Unsupported,
+        connections: SectionResult::Unsupported,
         fidelity_limited: false,
         notes: Vec::new(),
     }
@@ -248,6 +250,8 @@ impl DiscoveryProvider for NetlinkProvider {
             addresses_v6,
             routes_v4,
             routes_v6,
+            dns: SectionResult::Unsupported,
+            connections: SectionResult::Unsupported,
             // Netlink is the authoritative source; no fidelity caveats.
             fidelity_limited: false,
             notes,

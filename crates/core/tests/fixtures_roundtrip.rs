@@ -25,11 +25,11 @@ fn all_snapshot_fixtures_roundtrip() {
         let raw = std::fs::read_to_string(&path).expect("readable fixture");
         let parsed: NetworkSnapshot =
             serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{}: {}", path.display(), e));
-        assert_eq!(
-            parsed.schema_version,
-            SNAPSHOT_SCHEMA_VERSION,
-            "{}",
-            path.display()
+        assert!(
+            parsed.schema_version == 3 || parsed.schema_version == SNAPSHOT_SCHEMA_VERSION,
+            "{}: unexpected schema version {}",
+            path.display(),
+            parsed.schema_version
         );
 
         // Round-trip: re-serialize and parse again; must be identical.

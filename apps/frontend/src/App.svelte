@@ -1,7 +1,8 @@
 <script lang="ts">
-  // Application shell (WO-04 Stage A): six-section navigation (rail) +
-  // central workspace + reusable right details panel + compact bottom
-  // status area. WO-01R foundation + WO-02 views + WO-03 M1 document
+  // Application shell (WO-04 Stage A; WO-08 adds DNS and Connections):
+  // section navigation (rail) + central workspace + reusable right details
+  // panel + compact bottom status area. WO-01R foundation + WO-02 views +
+  // WO-03 M1 document
   // import, restructured without changing any data-fidelity behavior: the
   // app renders explicitly-labeled mock scenarios, imported observation
   // documents, or a live engine pair; the status bar says which and never
@@ -41,6 +42,8 @@
   import InterfacesView from './components/InterfacesView.svelte';
   import RoutesView from './components/RoutesView.svelte';
   import RouteDetails from './components/RouteDetails.svelte';
+  import DnsView from './components/DnsView.svelte';
+  import ConnectionsView from './components/ConnectionsView.svelte';
   import ProvidersView from './components/ProvidersView.svelte';
   import DocumentsView from './components/DocumentsView.svelte';
   import DetailsPanel from './components/DetailsPanel.svelte';
@@ -249,6 +252,21 @@
     navigateTo(next);
   }
 
+  // Cross-links (interface details → Routes/DNS/Connections) close the
+  // panel and switch sections; the panel's own focus-return target is
+  // unmounted by that switch. Move keyboard focus to the new view's
+  // landmark instead of letting it fall to <body> (WO-08, review I2).
+  function focusWorkspace(): void {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const workspace = document.querySelector(
+          'main[data-testid="workspace"]',
+        ) as HTMLElement | null;
+        workspace?.focus?.();
+      });
+    });
+  }
+
   // Test/inspection hook (same gating discipline as TopologyView): exposed
   // ONLY in development or with ?araiguma-test-hooks, so the e2e suite can
   // drive the destination API exactly as a future tray would. Inputs are
@@ -323,7 +341,7 @@
 <div class="app">
   <div class="app-body">
     <NavRail active={section} onnavigate={goTo} onimportclick={openImport} />
-    <main class="workspace" data-testid="workspace">
+    <main class="workspace" data-testid="workspace" tabindex="-1">
       {#if importError}
         <div class="import-error" data-testid="import-error" role="alert">
           <span>Import rejected — {importError}</span>
@@ -340,6 +358,7 @@
           {:else if topologyDocument}
             <TopologyView
               document={topologyDocument}
+              {snapshot}
               highlight={routeHighlight}
               onselect={(node) => (selectedNode = node)}
             />
@@ -359,6 +378,18 @@
               {selectedRoute}
               onselect={(route) => (selectedRoute = route)}
             />
+          {/if}
+        {:else if section === 'dns'}
+          {#if snapshotMissing}
+            <MissingDocument kind="snapshot" mode={missingMode} />
+          {:else if snapshot}
+            <DnsView {snapshot} />
+          {/if}
+        {:else if section === 'connections'}
+          {#if snapshotMissing}
+            <MissingDocument kind="snapshot" mode={missingMode} />
+          {:else if snapshot}
+            <ConnectionsView {snapshot} />
           {/if}
         {:else if section === 'providers'}
           {#if snapshotMissing}
@@ -384,7 +415,15 @@
     >
       {#snippet children()}
         {#if selectedInterface && snapshot}
-          <DetailsPanel iface={selectedInterface} {snapshot} />
+          <DetailsPanel
+            iface={selectedInterface}
+            {snapshot}
+            onopenSection={(section) => {
+              closePanel();
+              goTo(section);
+              focusWorkspace();
+            }}
+          />
         {:else if selectedNode && topologyDocument}
           <TopologyDetails node={selectedNode} document={topologyDocument} />
         {:else if selectedRoute}
@@ -430,6 +469,12 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
+  }
+
+  /* The workspace is a focus landmark for cross-link navigation (I2); it
+     takes no focus ring because it is a reading position, not a control. */
+  .workspace:focus {
+    outline: none;
   }
 
   .view-slot {

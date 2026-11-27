@@ -550,7 +550,7 @@ pub fn build_topology(snapshot: &NetworkSnapshot) -> TopologyDocument {
         ensure_gateway_node(&mut nodes, gateway);
         let contributing_sources: Vec<ObservationSource> = routes
             .iter()
-            .filter_map(|(route, _)| route.sources.first().copied())
+            .filter_map(|(route, _)| route.sources.first().cloned())
             .collect();
         edges.push(TopologyEdge {
             from: NodeId::Interface { ifindex: oif },
@@ -823,7 +823,7 @@ fn annotate_interface(nodes: &mut [TopologyNode], ifindex: u32, note: String) {
 /// (WO-03-F / AUD-06: `primary_source()` used to fall back to Netlink,
 /// inventing provenance that was never observed).
 fn primary_source(sources: &[ObservationSource]) -> Option<ObservationSource> {
-    sources.first().copied()
+    sources.first().cloned()
 }
 
 /// Evidence for a kernel-stated relationship. With attributed provenance

@@ -13,6 +13,8 @@ fn empty_snapshot() -> NetworkSnapshot {
         addresses: vec![],
         routes: vec![],
         providers: vec![],
+        dns: None,
+        connections: None,
     }
 }
 

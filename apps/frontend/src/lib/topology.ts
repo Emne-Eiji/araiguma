@@ -56,7 +56,7 @@ const EDGE_KINDS = [
 ] as const;
 const NODE_KINDS = ['interface', 'gateway'] as const;
 const NODE_STATES = ['active', 'inactive', 'unknown'] as const;
-const OBSERVATION_SOURCES = ['netlink', 'sysfs', 'procfs'] as const;
+// Observation-source identities are open strings (WO-06).
 const ADDRESS_SCOPES = ['global', 'site', 'link', 'host'] as const;
 const FAMILIES = ['ipv4', 'ipv6'] as const;
 
@@ -179,7 +179,7 @@ function parseTopologyInner(input: unknown): TopologyDocument {
     const evidence = asRecord(edge.evidence, `${path}.evidence`);
     if (evidence.observed !== undefined) {
       const observed = asRecord(evidence.observed, `${path}.evidence.observed`);
-      asEnum(observed.source, OBSERVATION_SOURCES, `${path}.evidence.observed.source`);
+      asNonEmptyString(observed.source, `${path}.evidence.observed.source`);
     } else if (evidence.inferred !== undefined) {
       const inferred = asRecord(evidence.inferred, `${path}.evidence.inferred`);
       asNonEmptyString(inferred.reason, `${path}.evidence.inferred.reason`);
@@ -270,7 +270,7 @@ export function parseTopology(input: unknown): TopologyDocument {
 }
 
 
-// Stable string key for a NodeId (used for selection and cytoscape ids).
+// Stable string key for a NodeId (used for selection and stable topology ids).
 export function nodeIdKey(id: NodeId): string {
   return 'interface' in id
     ? `if:${id.interface.ifindex}`

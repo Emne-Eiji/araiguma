@@ -318,7 +318,7 @@ fn missing_roots_fail_without_panicking() {
         observation.routes_v6,
         SectionResult::Failed(ref error) if error.contains("cannot read")
     ));
-    assert_eq!(observation.state(), ProviderState::Unavailable);
+    assert_eq!(observation.state(), ProviderState::Degraded);
 }
 
 #[test]

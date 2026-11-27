@@ -2,9 +2,9 @@ import { expect, test } from '@playwright/test';
 
 // Browser smoke test against the production build (preview server).
 // Establishes: the app starts, renders the shell and mock data, and does
-// not throw runtime errors. Since WO-04 Stage A the shell has six sections;
-// the interface cards live in the Interfaces section and the landing view
-// is the Overview summary.
+// not throw runtime errors. The shell has eight sections; the interface
+// cards live in the Interfaces section and the landing view is the Overview
+// summary.
 
 test('application renders the shell with mock interface cards', async ({ page }) => {
   const errors: string[] = [];

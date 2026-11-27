@@ -64,6 +64,99 @@ inside the repository. Edit sources in the repository — `frontend.sh`
 refreshes the copy on every invocation. The generated
 `package-lock.json` is copied back and must stay committed.
 
+## Optional D-Bus foundation tests
+
+`crates/provider-dbus` is the constrained, read-only D-Bus foundation for the
+optional NetworkManager and systemd-resolved providers. It is pinned to
+`zbus = 6.5.0` with only `tokio` and `proxy`; see `docs/architecture.md` for
+the permitted method, property, and signal surface.
+
+The tests never use the host system bus. Each test starts a private
+`dbus-daemon` from a temporary config with no service directories, exports
+its address as `DBUS_SYSTEM_BUS_ADDRESS`, runs raw mock services, and records
+the actual traffic with a separate `BecomeMonitor` connection. Tests are
+serialized inside the test binary because the bus address is process-wide.
+This requires `dbus-daemon` on `PATH`; `scripts/check-dbus-harness.sh` records
+whether the sandbox can run private buses. If the daemon is missing the
+tests fail explicitly rather than silently skipping.
+
+```sh
+cargo test -p araiguma-provider-dbus
+```
+
+The suite asserts preflight ordering, `NO_AUTO_START` on every application
+call, absence of `GetAll`/`Set`/`Introspect`/settings/secrets/enumeration,
+approved reply signatures, exact signal rules and sender pinning, bounded
+timeouts and error categories, failure without activation when a service is
+absent or disappears, and connection shutdown. Since WO-06C-C1 it also
+asserts the real active-connection interface
+(`org.freedesktop.NetworkManager.Connection.Active`) against an independently
+written literal on the wire, and rejects the legacy
+`org.freedesktop.NetworkManager.ActiveConnection` interface before the wire.
+
+## NetworkManager provider tests
+
+`crates/provider-nm` implements the optional NetworkManager provider on the
+accepted D-Bus foundation. Its tests reuse the private-bus harness and add a
+path-aware mock plus a fixture sysfs tree, so each active connection and
+device can return different approved values without touching the host.
+
+```sh
+cargo test -p araiguma-provider-nm
+```
+
+The suite covers construction, available and absent services, active
+connection discovery, device/interface mapping, VPN/state, empty and
+duplicate results, approved signals, partial and unresolved reads, permission
+denial, timeout, malformed replies, stale-data prevention, v4 serialization,
+and diagnostic privacy. Since WO-06C-C1 it also proves the provider reads
+active connections through the real NetworkManager interface
+(`org.freedesktop.NetworkManager.Connection.Active`, verified against an
+independently written literal on the wire), never the legacy
+`org.freedesktop.NetworkManager.ActiveConnection` name.
+
+## systemd-resolved provider tests
+
+`crates/provider-resolved` implements the optional systemd-resolved provider
+on the accepted D-Bus foundation. Its tests reuse the private-bus harness and
+add a path-aware mock for the three approved manager properties.
+
+```sh
+cargo test -p araiguma-provider-resolved
+```
+
+The suite covers global and per-link DNS scopes, IPv4/IPv6 addresses, search
+and routing domains, `ResolvConfMode`, empty versus partial observations,
+malformed tuples and modes, permission/timeout failures, service
+disappearance, v4 serialization, privacy, and wire-level proof that no
+`GetLink`, resolution method, setter, `GetAll`, or signal subscription is
+used.
+
+## Engine optional-provider lifecycle tests
+
+`crates/engine` owns the provider registry and optional-provider lifecycle.
+The tests use deterministic scripted providers and cover registry ordering,
+duplicate rejection, baseline-only opening snapshots, stable
+`NotYetObserved` reports, optional success/empty/failure replacement,
+disappearance/recovery, baseline isolation, event delivery, and shutdown.
+
+`crates/engine/tests/startup_validation.rs` covers the startup boundary
+(WO-07): the opening document validates as a v4 provider report, immediate
+topology projection succeeds before any optional observation, the snapshot
+and topology paths agree on ownership, the first optional refresh keeps the
+document valid, and the distinct outcomes (`NotObserved`, `Unsupported`,
+`Observed([])`, a non-empty observation, `Unavailable`, `Failed`) stay
+distinct. The placeholder reports the owned section as `NotObserved` and
+every non-owned section as `Unsupported`.
+
+```sh
+cargo test -p araiguma-engine
+```
+
+The CLI watch loop and desktop driver own the optional refresh timer; the
+engine itself spawns no background task. The default cadence is the
+authorized 30 s optional poll interval.
+
 ## Changing the data model (type-sync contract)
 
 The Rust model (`crates/core/src/model.rs`) is authoritative; the TypeScript
@@ -81,18 +174,28 @@ Procedure: change the Rust model → update fixtures (and sysfs trees if
 needed) → update `types.ts` to match the new serde shape → run
 `cargo test -p araiguma-core` and `scripts/frontend.sh test` until both are
 green. Keep serde renames in mind (camelCase fields, lowercase enums,
-`Other(u8)` variants serialize as `{"other": n}`).
+`Other(u8)` variants serialize as `{"other": n}`). The identity enums
+`ProviderId`, `ObservationSource`, and `SectionKind` use `Other(String)`:
+unknown non-empty identities serialize as the raw string (for example
+`"futureProvider"`), never as a tagged object.
 
 ### Schema versions
 
-Documents carry `schemaVersion`. Writers emit the current version (see
-`SNAPSHOT_SCHEMA_VERSION` / `TOPOLOGY_SCHEMA_VERSION` in crates/core);
-readers accept older versions only where they are unambiguous — a v1
-snapshot is accepted only if every `macAddress` is a non-null string,
-because v1 `null` could mean either "no hardware address" or "not
-observed". When bumping a version: update the constant, document the
-change in its doc comment and in `docs/architecture.md`, and update
-fixtures + validators in the same commit.
+Documents carry `schemaVersion`. Writers emit the current snapshot version
+(v4) and the current topology version (v3) — see `SNAPSHOT_SCHEMA_VERSION`
+and `TOPOLOGY_SCHEMA_VERSION` in crates/core. Readers accept older
+versions only where they are unambiguous — a v1 snapshot is accepted only
+if every `macAddress` is a non-null string, because v1 `null` could mean
+either "no hardware address" or "not observed". v2 and v3 snapshots parse
+under the v4 model; v4's optional `dns` and `connections` fields are
+absent in older documents, which means "not observed". A present v4
+`dns` or `connections` field must be an array; explicit `null` is
+rejected. DNS `mode` is an optional token: unknown non-empty values are
+preserved; empty or non-token values (whitespace, control characters, or
+punctuation other than `.`, `_`, `-`, `/`) are rejected.
+When bumping a version: update the constant, document the change in its
+doc comment and in `docs/architecture.md`, and update fixtures +
+validators in the same commit.
 
 ### Frontend document validation
 

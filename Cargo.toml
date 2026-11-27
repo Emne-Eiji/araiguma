@@ -16,6 +16,9 @@ araiguma-core = { path = "crates/core" }
 araiguma-sysfs = { path = "crates/sysfs" }
 araiguma-netlink = { path = "crates/netlink" }
 araiguma-engine = { path = "crates/engine" }
+araiguma-provider-dbus = { path = "crates/provider-dbus" }
+araiguma-provider-nm = { path = "crates/provider-nm" }
+araiguma-provider-resolved = { path = "crates/provider-resolved" }
 
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
@@ -27,6 +30,7 @@ netlink-packet-route = "=0.34.0"
 
 futures = "=0.3.34"
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "time", "sync", "signal"] }
+zbus = { version = "=6.5.0", default-features = false, features = ["tokio", "proxy"] }
 
 [profile.release]
 lto = "thin"
