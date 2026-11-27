@@ -270,7 +270,7 @@ export function parseTopology(input: unknown): TopologyDocument {
 }
 
 
-// Stable string key for a NodeId (used for selection and cytoscape ids).
+// Stable string key for a NodeId (used for selection and stable topology ids).
 export function nodeIdKey(id: NodeId): string {
   return 'interface' in id
     ? `if:${id.interface.ifindex}`

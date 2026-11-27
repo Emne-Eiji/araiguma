@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 
-// WO-04 Stage A shell tests: the six-section navigation rail (collapsed +
-// pinned modes, hover labels, keyboard operation, active state), the shared
+// WO-04 Stage A + WO-08 shell tests: the eight-section navigation rail
+// (collapsed + pinned modes, hover labels, keyboard operation, active
+// state), the shared
 // right details panel (open/close, Escape, empty state), the bottom status
 // area, the Documents & Import view states, the scenario registry
 // presentation, and the tray-compatible destination API (through the gated
@@ -12,11 +13,13 @@ const SECTIONS = [
   { testid: 'nav-topology', view: 'topology-canvas' },
   { testid: 'nav-interfaces', view: 'interfaces-view' },
   { testid: 'nav-routes', view: 'routes-table' },
+  { testid: 'nav-dns', view: 'dns-view' },
+  { testid: 'nav-connections', view: 'connections-view' },
   { testid: 'nav-providers', view: 'provider-netlink' },
   { testid: 'nav-documents', view: 'documents-view' },
 ] as const;
 
-test('all six sections are present, navigable, and marked active', async ({ page }) => {
+test('all eight sections are present, navigable, and marked active', async ({ page }) => {
   await page.goto('/');
 
   for (const section of SECTIONS) {
@@ -313,7 +316,8 @@ test('the overview summarizes the current documents and links the sections', asy
   await expect(counts.getByText('6', { exact: true })).toBeVisible();
   await expect(counts.getByText('12', { exact: true })).toBeVisible();
   await expect(counts.getByText('9', { exact: true })).toBeVisible();
-  await expect(counts.getByText('5', { exact: true })).toBeVisible();
+  // Evidenced relations = 5 (and the v4 connections collection is also 5).
+  await expect(counts.getByText('5', { exact: true }).first()).toBeVisible();
 
   // Section links navigate through the same destination API as the rail.
   await page.getByTestId('overview-link-topology').click();

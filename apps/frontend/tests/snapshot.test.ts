@@ -5,7 +5,7 @@ import { fixtures } from '../src/lib/fixtures';
 describe('snapshot fixtures (the type-sync contract)', () => {
   it('parses the workstation fixture', () => {
     const snapshot = fixtures.workstation.snapshot;
-    expect(snapshot.schemaVersion).toBe(3);
+    expect(snapshot.schemaVersion).toBe(4);
     // The design check depends on this card existing.
     expect(snapshot.interfaces.some((i) => i.name === 'wlp3s0')).toBe(true);
     // Multiple default routes across families are part of the scenario.
@@ -13,11 +13,19 @@ describe('snapshot fixtures (the type-sync contract)', () => {
       (r) => r.destination !== null && r.destination.prefixLen === 0,
     );
     expect(defaults.length).toBeGreaterThanOrEqual(2);
-    // Both providers report their state.
+    // Providers report their state; the two optional v4 sources own the
+    // new sections. `systemdResolved` owns DNS; `networkManager` owns
+    // connections; baseline providers mark those sections unsupported.
     expect(snapshot.providers.map((p) => p.provider).sort()).toEqual([
       'netlink',
+      'networkManager',
       'sysfs',
+      'systemdResolved',
     ]);
+    expect(snapshot.dns).toBeDefined();
+    expect(snapshot.dns).toHaveLength(3);
+    expect(snapshot.connections).toBeDefined();
+    expect(snapshot.connections).toHaveLength(5);
     // MAC observation (v2): a present address and an observed absence.
     const eth0 = snapshot.interfaces.find((i) => i.name === 'eth0');
     expect(eth0?.macAddress).toBe('52:54:00:12:34:56');

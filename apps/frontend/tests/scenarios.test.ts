@@ -70,10 +70,17 @@ describe('scenario registry integrity', () => {
   });
 
   it('scenario content is what the descriptions claim (honesty spot checks)', () => {
-    // workstation: well-observed, six interfaces, both providers report.
+    // workstation: well-observed, six interfaces; four providers report.
+    // `systemdResolved` owns DNS; `networkManager` owns connections.
     const workstation = scenarioSnapshot('workstation');
     expect(workstation.interfaces).toHaveLength(6);
-    expect(workstation.providers.map((p) => p.state).sort()).toEqual(['available', 'degraded']);
+    expect(workstation.providers.map((p) => p.state).sort()).toEqual([
+      'available',
+      'available',
+      'available',
+      'degraded',
+    ]);
+    expect(workstation.schemaVersion).toBe(4);
 
     // incomplete-observations: the primary provider failed entirely.
     const degraded = scenarioSnapshot('incomplete-observations');

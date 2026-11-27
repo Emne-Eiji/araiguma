@@ -11,16 +11,19 @@ import {
 import { findRouteByRef } from '../src/lib/routes';
 import { scenarioSnapshot } from '../src/lib/scenarios';
 
-// WO-04 Stage A: the six stable navigation destinations (the tray-
-// compatibility foundation) and the selected-object reference resolution.
+// WO-04 Stage A + WO-08: the stable navigation destinations (the tray-
+// compatibility foundation) and selected-object reference resolution.
+// WO-08 adds `dns` and `connections` for the optional v4 collections.
 
 describe('section registry', () => {
-  it('defines the six sections in the authorized order', () => {
+  it('defines the eight sections in the authorized order', () => {
     expect(SECTIONS).toEqual([
       'overview',
       'topology',
       'interfaces',
       'routes',
+      'dns',
+      'connections',
       'providers',
       'documents',
     ]);
@@ -38,11 +41,19 @@ describe('section registry', () => {
     }
   });
 
-  it('preserves the four pre-existing rail test ids (e2e compatibility)', () => {
+  it('preserves the pre-existing rail test ids (e2e compatibility)', () => {
     expect(SECTION_META.overview.testid).toBe('nav-overview');
     expect(SECTION_META.topology.testid).toBe('nav-topology');
     expect(SECTION_META.routes.testid).toBe('nav-routes');
     expect(SECTION_META.providers.testid).toBe('nav-providers');
+    expect(SECTION_META.documents.testid).toBe('nav-documents');
+  });
+
+  it('exposes the WO-08 DNS and connections sections with stable ids', () => {
+    expect(SECTION_META.dns.testid).toBe('nav-dns');
+    expect(SECTION_META.dns.label).toBe('DNS Configuration');
+    expect(SECTION_META.connections.testid).toBe('nav-connections');
+    expect(SECTION_META.connections.label).toBe('Connections');
   });
 
   it('uses the authorized section labels', () => {
@@ -52,7 +63,7 @@ describe('section registry', () => {
     expect(SECTION_META.interfaces.label).toBe('Interfaces');
   });
 
-  it('isSectionId accepts exactly the six sections', () => {
+  it('isSectionId accepts exactly the eight sections', () => {
     for (const section of SECTIONS) {
       expect(isSectionId(section)).toBe(true);
     }

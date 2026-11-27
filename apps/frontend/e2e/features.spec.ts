@@ -17,13 +17,26 @@ test('topology view renders the projected graph with legend', async ({ page }) =
   // The graph matches the golden document's counts (exposed read-only for
   // verification; canvas pixels are not assertable).
   const counts = await page.evaluate(() => {
-    const hook = (window as unknown as { __araigumaTopology?: { nodeCount: number; edgeCount: number } })
-      .__araigumaTopology;
+    const hook = (window as unknown as {
+      __araigumaTopology?: {
+        nodeCount: number;
+        edgeCount: number;
+        nodeLabels: string[];
+      };
+    }).__araigumaTopology;
     return hook ?? null;
   });
   expect(counts).not.toBeNull();
   expect(counts!.nodeCount).toBe(9); // 6 interfaces + 3 gateways (incl. the multipath route's)
   expect(counts!.edgeCount).toBe(5); // three single-path gateway edges + both multipath hops
+  // Every projected node is named (WO-08 review M7): the hook's label list
+  // must cover the interfaces and the gateways, with no invented entries.
+  expect(counts!.nodeLabels).toContain('eth0');
+  expect(counts!.nodeLabels).toContain('wlp3s0');
+  expect(counts!.nodeLabels).toContain('wg0');
+  expect(counts!.nodeLabels).toContain('192.168.1.1');
+  expect(counts!.nodeLabels).toContain('198.51.100.1');
+  expect(new Set(counts!.nodeLabels).size).toBe(counts!.nodeLabels.length);
 
   // Legend explains the semantics, including what is NOT drawn.
   await expect(page.getByText('observed relation')).toBeVisible();
@@ -164,26 +177,48 @@ test('route details expose flags, notes, sources, and the full multipath hop lis
   expect(labels.some((l) => l.includes('multipath') === false && l.includes('route'))).toBe(true);
 });
 
-test('provider status view reports both providers honestly', async ({ page }) => {
+test('provider health view renders the provider x section coverage matrix', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('nav-providers').click();
+
   const netlink = page.getByTestId('provider-netlink');
   const sysfs = page.getByTestId('provider-sysfs');
+  const resolved = page.getByTestId('provider-systemdResolved');
+  const networkManager = page.getByTestId('provider-networkManager');
   await expect(netlink).toBeVisible();
   await expect(sysfs).toBeVisible();
+  await expect(resolved).toBeVisible();
+  await expect(networkManager).toBeVisible();
 
-  await expect(netlink.getByText('available', { exact: false })).toBeVisible();
-  await expect(sysfs.getByText('degraded', { exact: false })).toBeVisible();
+  await expect(netlink).toContainText('available');
+  await expect(sysfs).toContainText('degraded');
+  await expect(resolved).toContainText('available');
+  await expect(networkManager).toContainText('available');
 
-  // Section outcomes include counts and an unsupported statement.
-  // Since WO-03 M4 the sysfs provider parses /proc/net/ipv6_route, so its
-  // only remaining unsupported section is IPv4 addresses.
-  await expect(sysfs.getByText('not supported by this source')).toHaveCount(1);
-  await expect(netlink.getByText('9 observed')).toBeVisible();
+  // Provider ownership is explicit.
+  await expect(resolved).toContainText('owns DNS');
+  await expect(networkManager).toContainText('owns connections');
 
-  // Notes are shown verbatim.
+  // Section outcomes include counts and not-supported cells.
+  await expect(netlink.locator('td[aria-label*="9 observed"]').first()).toBeVisible();
+  // sysfs cannot observe IPv4 addresses; it does not claim anything else.
+  await expect(sysfs.locator('td[aria-label*="not supported by this source"]')).toHaveCount(3);
+  // Baseline providers mark the optional sections unsupported; owners are distinct.
+  await expect(netlink.locator('td[aria-label*="not supported by this source"]')).toHaveCount(2);
+  await expect(resolved.locator('td[aria-label*="3 observed"]')).toHaveCount(1);
+  await expect(networkManager.locator('td[aria-label*="5 observed"]')).toHaveCount(1);
+
+  // The full outcome vocabulary is rendered.
+  const vocab = page.locator('section[aria-label="Outcome vocabulary"]');
+  await expect(vocab).toContainText('not supported by this source');
+  await expect(vocab).toContainText('not observed');
+  await expect(vocab).toContainText('failed');
+  await expect(vocab).toContainText('unavailable');
+  await expect(vocab).toContainText('permission denied');
+
+  // Notes are shown verbatim (in the provider's notes section).
   await expect(
-    sysfs.getByText(/sysfs cannot distinguish dummy, veth, vlan/),
+    page.locator('section[aria-label="Notes for sysfs"]').getByText(/sysfs cannot distinguish dummy, veth, vlan/),
   ).toBeVisible();
 });
 
@@ -290,6 +325,41 @@ test('import workflow: snapshot and topology documents, provenance, and return t
   await expect(page.getByTestId('mock-badge')).toBeVisible();
   await page.getByTestId('nav-interfaces').click();
   await expect(page.getByTestId('iface-card-wlp3s0')).toBeVisible();
+});
+
+// WO-08 review C1: with NO snapshot document, the overview must not claim
+// interfaces/default routes were observed. Only a topology is imported, so
+// the snapshot-driven tiles must state NOT OBSERVED, never OBSERVED(0).
+test('import workflow: overview stays honest with only a topology document', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByTestId('import-file-input').setInputFiles({
+    name: 'topo-only.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(workstationTopology)),
+  });
+  await expect(page.getByTestId('imported-badge')).toBeVisible();
+
+  await page.getByTestId('nav-overview').click();
+  const interfacesTile = page.getByTestId('overview-stat-interfaces');
+  await expect(interfacesTile.getByText('NOT OBSERVED', { exact: true })).toBeVisible();
+  await expect(
+    interfacesTile.getByText('no snapshot', { exact: false }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId('overview-stat-routes').getByText('NOT OBSERVED', { exact: true }),
+  ).toBeVisible();
+
+  // The DNS/Connections tiles follow the same rule (already correct).
+  await expect(
+    page.getByTestId('overview-stat-dns').getByText('NOT OBSERVED', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByTestId('overview-stat-connections')
+      .getByText('NOT OBSERVED', { exact: true }),
+  ).toBeVisible();
 });
 
 test('import workflow: an unsupported schema version is rejected with the reason', async ({

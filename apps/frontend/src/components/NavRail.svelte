@@ -1,7 +1,8 @@
 <script lang="ts">
-  // Navigation rail (WO-04 Stage A): six stable sections. Two modes — the
-  // default compact icon-only 56px rail with a hover label preview, and a
-  // pinned expanded mode with persistent labels (a session-only choice).
+  // Navigation rail (WO-04 Stage A; WO-08 adds DNS and Connections): stable
+  // sections. Two modes — the default compact icon-only 56px rail with a
+  // hover label preview, and a pinned expanded mode with persistent labels
+  // (a session-only choice).
   // The bottom section carries the data source controls (WO-03 M1): import
   // an observation document, and — when imported documents are shown —
   // return to the synthetic demonstration data. The file input itself lives
@@ -105,6 +106,22 @@
           <circle cx="5" cy="19" r="1.9" />
           <path d="M19 15l1.6 1.4L22.4 13" />
           <path d="M5 19h14" stroke-dasharray="2 3" opacity="0.45" />
+        </svg>
+      {:else if section === 'dns'}
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+          stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+          <rect x="4" y="4" width="16" height="6" rx="1.6" />
+          <rect x="4" y="14" width="16" height="6" rx="1.6" />
+          <path d="M7.5 7h.01M7.5 17h.01" />
+          <path d="M11 7h5M11 17h5" />
+        </svg>
+      {:else if section === 'connections'}
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+          stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+          <circle cx="7" cy="12" r="3.2" />
+          <circle cx="17" cy="12" r="3.2" />
+          <path d="M10.2 12h3.6" />
+          <path d="M5 5.5v3M19 15.5v3" opacity="0.55" />
         </svg>
       {:else if section === 'providers'}
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
