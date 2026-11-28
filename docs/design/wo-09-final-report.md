@@ -1,7 +1,8 @@
 # WO-09 — Identity, repository presentation, and documentation refresh
 
-**Status:** Implementation complete and validated; **uncommitted** pending Emne's
-review and explicit publication authorization.
+**Status:** Implementation complete, validated, and **published to `main`** as
+`8ef3eb567fcbb8ab47bd0711cbc2dc0b5c868d5e` (2026-11-28), after Emne's explicit
+publication authorization. Next gate: independent audit by GLM 5.3 Max.
 **Authority:** Emne (Product Owner). **Implementer:** Tidy.
 **Branch:** `main`. **Baseline commit:** `b6da3d661740113c8025d3915832775b7cbcac0f`.
 **Date:** 2026-11-28.
@@ -346,16 +347,24 @@ deliverable.
   packaged application was not installed or launched.
 - The 16/24 px tiny icon drops fine facial and network detail; this is an
   intentional legibility trade-off, recorded in §4 and §6.
-- The GitHub description is updated externally; the repository implementation
-  remains uncommitted and unpublished pending Emne's authorization.
+- The GitHub description was updated externally, and the implementation was
+  committed and pushed to `origin/main` under Emne's publication authorization
+  (see §14).
 
-## 14. Final Git state
+## 14. Final Git state and publication
 
-[EXEC] HEAD remains `b6da3d661740113c8025d3915832775b7cbcac0f`; no WO-09 commit
-exists. The working tree contains the changes listed in §10 (modified, deleted,
-and untracked files) and this report. `main` still points at the baseline commit;
-nothing was committed, pushed, merged, or published. The archive branch remains
-at `08e58f3`; the recovery branch remains deleted.
+[REPO] The WO-09 changes listed in §10 were committed as
+`8ef3eb567fcbb8ab47bd0711cbc2dc0b5c868d5e` — message “WO-09: refresh identity,
+screenshots, and public documentation” (36 files; 11 modified, 6 deleted, 19
+added) — and pushed to `origin/main` as a normal fast-forward
+(`b6da3d6..8ef3eb5`). Remote `main` now equals local `main` at `8ef3eb5`; the
+working tree is clean.
+
+No force-push, history rewrite, default-branch change, merge, or extra branch
+was used, and no unrelated work was included. The archive branch remains at
+`08e58f3`; the recovery branch remains deleted. Before this publication the
+repository was at the baseline `b6da3d6` with the WO-09 changes staged; §§1–13
+record the implementation and validation that led to this commit.
 
 ## 15. Scope statement
 
