@@ -212,13 +212,13 @@ drift).
 
 ## Git workflow
 
-- Current development branch: **`recovery/araiguma-main`**, tracking
-  **`origin/recovery/araiguma-main`** on the GitHub remote `origin`
-  (`https://github.com/Emne-Eiji/araiguma.git`). GitHub `main` is the
-  canonical published history and points at the same recovered commit; the
-  pre-recovery two-commit history is preserved on
-  `archive/main-pre-recovery-2026-11-21` [REPO][HIST]. No local `main`
-  development branch exists.
+- Current development branch: **`main`**, tracking **`origin/main`** on the
+  GitHub remote `origin` (`https://github.com/Emne-Eiji/araiguma.git`). It is
+  the canonical branch.
+- The pre-recovery two-commit history is preserved on
+  `archive/main-pre-recovery-2026-11-21` for historical reference only; it is
+  not an active development branch. The former `recovery/araiguma-main` branch
+  has been retired.
 - Repository-local identity only:
 
   ```sh

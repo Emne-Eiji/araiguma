@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Araiguma tiny application icon">
+  <title>Araiguma tiny application icon</title>
+  <!-- Purpose-built for 16-24 px: thicker strokes, larger head, no brow,
+       network stubs, or fine mask detail that would collapse at that size. -->
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="14" fill="#0b0c0f" stroke="#232833" stroke-width="1.5"/>
+  <path d="M9 22 C10 10 15 4 20 4 C25 4 28 12 30 21 Z" fill="#171a21" stroke="#4cc9e8" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M55 22 C54 10 49 4 44 4 C39 4 36 12 34 21 Z" fill="#171a21" stroke="#4cc9e8" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M14 18 C15 11 17 8 20 8 C23 8 25 13 26 18 Z" fill="#52c58f"/>
+  <path d="M50 18 C49 11 47 8 44 8 C41 8 39 13 38 18 Z" fill="#52c58f"/>
+  <circle cx="32" cy="34" r="22" fill="#171a21" stroke="#4cc9e8" stroke-width="4"/>
+  <circle cx="24" cy="34" r="5" fill="#4cc9e8"/>
+  <circle cx="40" cy="34" r="5" fill="#4cc9e8"/>
+  <path d="M32 44 C37 44 40 47 40 50 C40 54 36 56 32 56 C28 56 24 54 24 50 C24 47 27 44 32 44 Z" fill="#cfd6de"/>
+  <ellipse cx="32" cy="49" rx="3" ry="2" fill="#0b0f14"/>
+</svg>

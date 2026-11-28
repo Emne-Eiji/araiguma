@@ -1,49 +1,85 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="560" height="360" viewBox="0 0 560 360">
-  <rect width="560" height="360" fill="#ffffff"/>
-  <style>
-    .box { fill: #f6f8fa; stroke: #8aa3b2; stroke-width: 1.6; rx: 10; }
-    .label { font-family: system-ui, -apple-system, sans-serif; font-size: 15px; fill: #1c2530; font-weight: 600; }
-    .detail { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; fill: #475566; }
-    .edge { stroke: #8aa3b2; stroke-width: 2; fill: none; marker-end: url(#arrow); }
-  </style>
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="500" viewBox="0 0 760 500" role="img" aria-label="Araiguma observation pipeline: four read-only providers feed a shared engine and merge into schema v4 documents consumed by the CLI and the Tauri desktop frontend">
+  <title>Araiguma observation pipeline</title>
+  <rect width="760" height="500" fill="#ffffff"/>
   <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
-      <path d="M2 2 L9 5 L2 8" stroke="#8aa3b2" stroke-width="2" fill="none"/>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M2 2 L9 5 L2 8" stroke="#8aa3b2" stroke-width="1.6" fill="none"/>
     </marker>
   </defs>
-  <!-- Source boxes -->
-  <rect class="box" x="40" y="50" width="240" height="76"/>
-  <text class="label" x="160" y="76">rtnetlink (primary, priority 0)</text>
-  <text class="detail" x="160" y="94">links · addresses · routes (all tables, multipath)</text>
+  <style>
+    .title { font-family: system-ui, -apple-system, sans-serif; font-size: 15px; font-weight: 600; fill: #1c2530; }
+    .label { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; font-weight: 600; fill: #1c2530; }
+    .small { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; fill: #475566; }
+    .tiny  { font-family: system-ui, -apple-system, sans-serif; font-size: 10px; fill: #5b6b7c; }
+    .box { fill: #f6f8fa; stroke: #8aa3b2; stroke-width: 1.4; }
+    .box-accent { fill: #eef8f6; stroke: #2a9d8f; stroke-width: 1.6; }
+    .edge { stroke: #8aa3b2; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+    .stem { stroke: #8aa3b2; stroke-width: 1.6; fill: none; }
+    .badge { fill: #e8f6f2; stroke: #2a9d8f; stroke-width: 1; }
+  </style>
 
-  <rect class="box" x="320" y="50" width="200" height="76"/>
-  <text class="label" x="420" y="76">sysfs / procfs (fallback, priority 1)</text>
-  <text class="detail" x="420" y="94">/sys/class/net · /proc/net/route · /proc/net/if_inet6 · /proc/net/ipv6_route</text>
+  <text class="title" x="24" y="28">Araiguma observation pipeline</text>
+  <rect class="badge" x="640" y="14" width="96" height="22" rx="11"/>
+  <text class="tiny" x="688" y="29" text-anchor="middle">READ-ONLY</text>
+
+  <!-- Providers -->
+  <rect class="box" x="20" y="52" width="165" height="86" rx="10"/>
+  <text class="label" x="102" y="76" text-anchor="middle">rtnetlink</text>
+  <text class="small" x="102" y="94" text-anchor="middle">primary · priority 0</text>
+  <text class="tiny"  x="102" y="112" text-anchor="middle">links · addresses · routes</text>
+  <text class="tiny"  x="102" y="126" text-anchor="middle">all tables · multipath</text>
+
+  <rect class="box" x="205" y="52" width="165" height="86" rx="10"/>
+  <text class="label" x="287" y="76" text-anchor="middle">sysfs / procfs</text>
+  <text class="small" x="287" y="94" text-anchor="middle">fallback · priority 1</text>
+  <text class="tiny"  x="287" y="112" text-anchor="middle">/sys/class/net · /proc/net</text>
+  <text class="tiny"  x="287" y="126" text-anchor="middle">honest degradation</text>
+
+  <rect class="box" x="390" y="52" width="165" height="86" rx="10"/>
+  <text class="label" x="472" y="76" text-anchor="middle">NetworkManager</text>
+  <text class="small" x="472" y="94" text-anchor="middle">optional · owns connections</text>
+  <text class="tiny"  x="472" y="112" text-anchor="middle">active connection objects</text>
+  <text class="tiny"  x="472" y="126" text-anchor="middle">no settings · no secrets</text>
+
+  <rect class="box" x="575" y="52" width="165" height="86" rx="10"/>
+  <text class="label" x="657" y="76" text-anchor="middle">systemd-resolved</text>
+  <text class="small" x="657" y="94" text-anchor="middle">optional · owns DNS</text>
+  <text class="tiny"  x="657" y="112" text-anchor="middle">DNSEx · Domains</text>
+  <text class="tiny"  x="657" y="126" text-anchor="middle">ResolvConfMode</text>
+
+  <!-- Edges to engine -->
+  <path class="stem" d="M102 138 L102 160 L380 160"/>
+  <path class="stem" d="M287 138 L287 160 L380 160"/>
+  <path class="stem" d="M472 138 L472 160 L380 160"/>
+  <path class="stem" d="M657 138 L657 160 L380 160"/>
+  <path class="edge" d="M380 160 L380 186"/>
+
+  <!-- Engine -->
+  <rect class="box-accent" x="210" y="188" width="340" height="72" rx="10"/>
+  <text class="label" x="380" y="213" text-anchor="middle">Shared observation engine (crates/engine)</text>
+  <text class="tiny"  x="380" y="232" text-anchor="middle">provider registry · optional lifecycle · ordered envelopes</text>
+  <text class="tiny"  x="380" y="247" text-anchor="middle">subscriptions · resync · monitor health</text>
+
+  <path class="edge" d="M380 260 L380 288"/>
 
   <!-- Merge -->
-  <rect class="box" x="185" y="190" width="190" height="52"/>
-  <text class="label" x="280" y="218">Merge &amp; observation model</text>
-  <text class="detail" x="280" y="232">netlink wins · sysfs fills gaps · per-item sources</text>
+  <rect class="box" x="210" y="290" width="340" height="72" rx="10"/>
+  <text class="label" x="380" y="315" text-anchor="middle">Merge &amp; evidence model (schema v4)</text>
+  <text class="tiny"  x="380" y="334" text-anchor="middle">netlink wins · sysfs fills gaps · per-item sources</text>
+  <text class="tiny"  x="380" y="349" text-anchor="middle">explicit section ownership · unknown stays unknown</text>
+
+  <!-- Edges to outputs -->
+  <path class="edge" d="M380 362 L380 386 L245 386 L245 408"/>
+  <path class="edge" d="M380 362 L380 386 L515 386 L515 408"/>
 
   <!-- Outputs -->
-  <rect class="box" x="185" y="290" width="190" height="50"/>
-  <text class="label" x="280" y="315">NetworkSnapshot</text>
-  <text class="detail" x="280" y="329">schema v3 · shared engine document</text>
+  <rect class="box" x="130" y="410" width="230" height="58" rx="10"/>
+  <text class="label" x="245" y="434" text-anchor="middle">CLI</text>
+  <text class="tiny"  x="245" y="452" text-anchor="middle">araiguma snapshot · watch · topology --input</text>
 
-  <rect class="box" x="40" y="250" width="240" height="64"/>
-  <text class="label" x="160" y="275">CLI</text>
-  <text class="detail" x="160" y="293">araiguma snapshot · watch · topology --input</text>
+  <rect class="box" x="400" y="410" width="230" height="58" rx="10"/>
+  <text class="label" x="515" y="434" text-anchor="middle">Tauri 2 desktop + Svelte 5</text>
+  <text class="tiny"  x="515" y="452" text-anchor="middle">eight sections · mock / imported / live documents</text>
 
-  <rect class="box" x="320" y="250" width="200" height="64"/>
-  <text class="label" x="420" y="275">Tauri desktop + frontend</text>
-  <text class="detail" x="420" y="293">validated live IPC · mock / imported / live documents</text>
-
-  <!-- Edges -->
-  <path class="edge" d="M160 126 L160 150 L280 150"/>          <!-- rtnetlink -> merge -->
-  <path class="edge" d="M280 150 L280 190"/>                     <!-- source arrows -->
-  <path class="edge" d="M420 126 L420 150 L280 150"/>           <!-- sysfs/procfs -> merge -->
-  <path class="edge" d="M280 242 L280 290"/>                     <!-- merge -> snapshot -->
-  <path class="edge" d="M280 292 L160 292 L160 250"/>           <!-- snapshot -> CLI -->
-  <path class="edge" d="M280 292 L420 292 L420 250"/>           <!-- snapshot -> frontend -->
-  <text class="detail" x="400" y="33" text-anchor="middle">Araiguma observation pipeline</text>
+  <text class="tiny" x="24" y="486">Observe, do not control. Every value is an observation or an explicit “not observed”.</text>
 </svg>

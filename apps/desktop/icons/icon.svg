@@ -1,48 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-<defs>
-
-<linearGradient id="fur" gradientUnits="userSpaceOnUse" x1="0" y1="30" x2="0" y2="930">
-  <stop offset="0" stop-color="#5C6674"/><stop offset="1" stop-color="#3A424C"/>
-</linearGradient>
-<linearGradient id="inner" gradientUnits="userSpaceOnUse" x1="0" y1="100" x2="0" y2="280">
-  <stop offset="0" stop-color="#66D6BE"/><stop offset="1" stop-color="#46B99C"/>
-</linearGradient>
-<linearGradient id="maskg" gradientUnits="userSpaceOnUse" x1="0" y1="436" x2="0" y2="682">
-  <stop offset="0" stop-color="#1B2027"/><stop offset="1" stop-color="#101419"/>
-</linearGradient>
-<linearGradient id="muz" gradientUnits="userSpaceOnUse" x1="0" y1="640" x2="0" y2="890">
-  <stop offset="0" stop-color="#F7F9FA"/><stop offset="1" stop-color="#D9DFE4"/>
-</linearGradient>
-<radialGradient id="iris">
-  <stop offset="0" stop-color="#D9FFF2"/>
-  <stop offset="0.45" stop-color="#4FE8BE"/>
-  <stop offset="1" stop-color="#24C79B"/>
-</radialGradient>
-<radialGradient id="gloss">
-  <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.10"/>
-  <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
-</radialGradient>
-<clipPath id="headclip"><path d="M 512 190 C 558.67 190 609.5 190.33 652 194 C 694.5 197.67 732.83 201 767 212 C 801.17 223 832 238.67 857 260 C 882 281.33 903.17 308.67 917 340 C 930.83 371.33 935.5 410 940 448 C 944.5 486 945.67 527.33 944 568 C 942.33 608.67 940 652.33 930 692 C 920 731.67 906.17 774 884 806 C 861.83 838 831.5 864.67 797 884 C 762.5 903.33 724.5 914.67 677 922 C 629.5 929.33 567 928 512 928 C 457 928 394.5 929.33 347 922 C 299.5 914.67 261.5 903.33 227 884 C 192.5 864.67 162.17 838 140 806 C 117.83 774 104 731.67 94 692 C 84 652.33 81.67 608.67 80 568 C 78.33 527.33 79.5 486 84 448 C 88.5 410 93.17 371.33 107 340 C 120.83 308.67 142 281.33 167 260 C 192 238.67 222.83 223 257 212 C 291.17 201 329.5 197.67 372 194 C 414.5 190.33 465.33 190 512 190 Z"/></clipPath></defs>
-<path d="M 230 74 C 258.33 82.33 310.67 160 342 196 C 373.33 232 451.67 275.67 418 290 C 384.33 304.33 181 306 140 282 C 99 258 157 180.67 172 146 C 187 111.33 201.67 65.67 230 74 Z" fill="url(#fur)"/>
-<path d="M 794 74 C 765.67 82.33 713.33 160 682 196 C 650.67 232 572.33 275.67 606 290 C 639.67 304.33 843 306 884 282 C 925 258 867 180.67 852 146 C 837 111.33 822.33 65.67 794 74 Z" fill="url(#fur)"/>
-<path d="M 238 136 C 215.33 135 177 233.33 192 254 C 207 274.67 320.33 279.67 328 260 C 335.67 240.33 260.67 137 238 136 Z" fill="url(#inner)"/>
-<path d="M 786 136 C 808.67 135 847 233.33 832 254 C 817 274.67 703.67 279.67 696 260 C 688.33 240.33 763.33 137 786 136 Z" fill="url(#inner)"/>
-<path d="M 512 190 C 558.67 190 609.5 190.33 652 194 C 694.5 197.67 732.83 201 767 212 C 801.17 223 832 238.67 857 260 C 882 281.33 903.17 308.67 917 340 C 930.83 371.33 935.5 410 940 448 C 944.5 486 945.67 527.33 944 568 C 942.33 608.67 940 652.33 930 692 C 920 731.67 906.17 774 884 806 C 861.83 838 831.5 864.67 797 884 C 762.5 903.33 724.5 914.67 677 922 C 629.5 929.33 567 928 512 928 C 457 928 394.5 929.33 347 922 C 299.5 914.67 261.5 903.33 227 884 C 192.5 864.67 162.17 838 140 806 C 117.83 774 104 731.67 94 692 C 84 652.33 81.67 608.67 80 568 C 78.33 527.33 79.5 486 84 448 C 88.5 410 93.17 371.33 107 340 C 120.83 308.67 142 281.33 167 260 C 192 238.67 222.83 223 257 212 C 291.17 201 329.5 197.67 372 194 C 414.5 190.33 465.33 190 512 190 Z" fill="url(#fur)"/>
-<ellipse cx="512" cy="288" rx="240" ry="100" fill="url(#gloss)" clip-path="url(#headclip)"/>
-<ellipse cx="512" cy="882" rx="230" ry="54" fill="#000000" opacity="0.08" clip-path="url(#headclip)"/>
-<path d="M 512 460 C 548.67 460 584.5 451.33 622 448 C 659.5 444.67 704.83 441 737 440 C 769.17 439 794.83 436 815 442 C 835.17 448 849.17 459 858 476 C 866.83 493 867 521 868 544 C 869 567 869.33 593.33 864 614 C 858.67 634.67 854.67 657.33 836 668 C 817.33 678.67 786 677.33 752 678 C 718 678.67 672 675.33 632 672 C 592 668.67 552 658 512 658 C 472 658 432 668.67 392 672 C 352 675.33 306 678.67 272 678 C 238 677.33 206.67 678.67 188 668 C 169.33 657.33 165.33 634.67 160 614 C 154.67 593.33 155 567 156 544 C 157 521 157.17 493 166 476 C 174.83 459 188.83 448 209 442 C 229.17 436 254.83 439 287 440 C 319.17 441 364.5 444.67 402 448 C 439.5 451.33 475.33 460 512 460 Z" fill="url(#maskg)"/>
-<ellipse cx="344" cy="443" rx="100" ry="30" fill="#E8ECEF" opacity="0.95" transform="rotate(-3 344 443)"/>
-<ellipse cx="680" cy="443" rx="100" ry="30" fill="#E8ECEF" opacity="0.95" transform="rotate(3 680 443)"/>
-<ellipse cx="512" cy="764" rx="168" ry="122" fill="url(#muz)"/>
-<path d="M 499 640 C 501.67 629.67 522.33 629.67 525 640 C 527.67 650.33 517.67 691.67 515 702 C 512.33 712.33 511.67 712.33 509 702 C 506.33 691.67 496.33 650.33 499 640 Z" fill="#161B22"/>
-<path d="M 462 712 C 467.33 703.33 495.33 702 512 702 C 528.67 702 556.67 703.33 562 712 C 567.33 720.67 552.33 744.33 544 754 C 535.67 763.67 522.67 770 512 770 C 501.33 770 488.33 763.67 480 754 C 471.67 744.33 456.67 720.67 462 712 Z" fill="#161B22"/>
-<path d="M 462 812 Q 512 842 562 812" fill="none" stroke="#2A323C" stroke-width="13" stroke-linecap="round"/>
-<circle cx="344" cy="540" r="60" fill="#FFFFFF"/>
-<circle cx="344" cy="540" r="39" fill="url(#iris)"/>
-<circle cx="344" cy="540" r="15" fill="#0B2A22"/>
-<circle cx="327" cy="521" r="12" fill="#FFFFFF" opacity="0.95"/>
-<circle cx="680" cy="540" r="60" fill="#FFFFFF"/>
-<circle cx="680" cy="540" r="39" fill="url(#iris)"/>
-<circle cx="680" cy="540" r="15" fill="#0B2A22"/>
-<circle cx="663" cy="521" r="12" fill="#FFFFFF" opacity="0.95"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Araiguma application icon">
+  <title>Araiguma application icon</title>
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="14" fill="#0b0c0f" stroke="#232833" stroke-width="1.5"/>
+  <g transform="translate(6.4 6.4) scale(0.8)">
+    <defs>
+      <clipPath id="araiguma-app-head">
+        <circle cx="32" cy="36" r="20.5"/>
+      </clipPath>
+    </defs>
+    <g stroke="#4cc9e8" stroke-width="2" stroke-linecap="round">
+      <path d="M11.5 36 H5.5"/>
+      <path d="M52.5 36 H58.5"/>
+    </g>
+    <g fill="#52c58f">
+      <circle cx="5.5" cy="36" r="2.2"/>
+      <circle cx="58.5" cy="36" r="2.2"/>
+    </g>
+    <path d="M8 21 C9 12 13 5 17 5 C21 5 24 11 26 19 Z" fill="#171a21" stroke="#4cc9e8" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="M56 21 C55 12 51 5 47 5 C43 5 40 11 38 19 Z" fill="#171a21" stroke="#4cc9e8" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="M12 18 C13 12 15 8 17 8 C19 8 21 12 22 18 Z" fill="#52c58f" opacity="0.9"/>
+    <path d="M52 18 C51 12 49 8 47 8 C45 8 43 12 42 18 Z" fill="#52c58f" opacity="0.9"/>
+    <circle cx="32" cy="36" r="20.5" fill="#171a21" stroke="#4cc9e8" stroke-width="3"/>
+    <ellipse cx="23" cy="29.5" rx="5.6" ry="2.5" fill="#cfd6de" clip-path="url(#araiguma-app-head)"/>
+    <ellipse cx="41" cy="29.5" rx="5.6" ry="2.5" fill="#cfd6de" clip-path="url(#araiguma-app-head)"/>
+    <rect x="9" y="31" width="46" height="12.5" rx="6.25" fill="#07090c" clip-path="url(#araiguma-app-head)"/>
+    <circle cx="23.5" cy="37" r="4.2" fill="#4cc9e8"/>
+    <circle cx="40.5" cy="37" r="4.2" fill="#4cc9e8"/>
+    <circle cx="22.1" cy="35.7" r="1.2" fill="#e8eaef" opacity="0.9"/>
+    <circle cx="39.1" cy="35.7" r="1.2" fill="#e8eaef" opacity="0.9"/>
+    <path d="M32 45 C36.6 45 39.4 47.6 39.4 50.2 C39.4 53.4 36 55.4 32 55.4 C28 55.4 24.6 53.4 24.6 50.2 C24.6 47.6 27.4 45 32 45 Z" fill="#cfd6de"/>
+    <ellipse cx="32" cy="48.4" rx="2.1" ry="1.5" fill="#0b0f14"/>
+  </g>
 </svg>

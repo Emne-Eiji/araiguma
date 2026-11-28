@@ -28,12 +28,25 @@
 <nav class="rail" class:expanded={pinned} aria-label="Primary navigation">
   <div class="mark" aria-hidden="true">
     <svg viewBox="0 0 24 24" width="22" height="22">
-      <rect x="3" y="3" width="18" height="18" rx="5" fill="none"
-        stroke="var(--accent)" stroke-width="1.6" />
-      <circle cx="9" cy="13" r="2.1" fill="var(--accent)" />
-      <circle cx="15" cy="13" r="2.1" fill="var(--accent)" />
-      <path d="M 8 8.5 Q 12 11 16 8.5" fill="none" stroke="var(--accent)"
-        stroke-width="1.6" stroke-linecap="round" />
+      <!-- one observed link through the head: observed node - observer - observed node -->
+      <g stroke="var(--accent)" stroke-width="1.4" stroke-linecap="round">
+        <path d="M4.2 13.5H1.8M19.8 13.5H22.2" />
+      </g>
+      <g fill="var(--accent)">
+        <circle cx="1.8" cy="13.5" r="0.9" />
+        <circle cx="22.2" cy="13.5" r="0.9" />
+      </g>
+      <!-- rounded raccoon ears -->
+      <path d="M6.4 9.4C6.7 6.4 7.7 4.6 9 4.6C10.3 4.6 11.1 6.4 11.5 8.8Z"
+        fill="var(--bg-panel)" stroke="var(--accent)" stroke-width="1.4" stroke-linejoin="round" />
+      <path d="M17.6 9.4C17.3 6.4 16.3 4.6 15 4.6C13.7 4.6 12.9 6.4 12.5 8.8Z"
+        fill="var(--bg-panel)" stroke="var(--accent)" stroke-width="1.4" stroke-linejoin="round" />
+      <!-- observation node / head -->
+      <circle cx="12" cy="13.5" r="7.4" fill="var(--bg-panel)" stroke="var(--accent)" stroke-width="1.6" />
+      <!-- bandit mask and eyes -->
+      <path d="M5.8 12.4H18.2" stroke="var(--accent)" stroke-width="2.4" opacity="0.35" stroke-linecap="round" />
+      <circle cx="9.2" cy="13.5" r="1.5" fill="var(--accent)" />
+      <circle cx="14.8" cy="13.5" r="1.5" fill="var(--accent)" />
     </svg>
   </div>
 

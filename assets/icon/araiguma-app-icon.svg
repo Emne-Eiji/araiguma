@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Araiguma application icon">
+  <title>Araiguma application icon</title>
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="14" fill="#0b0c0f" stroke="#232833" stroke-width="1.5"/>
+  <g transform="translate(6.4 6.4) scale(0.8)">
+    <defs>
+      <clipPath id="araiguma-app-head">
+        <circle cx="32" cy="36" r="20.5"/>
+      </clipPath>
+    </defs>
+    <g stroke="#4cc9e8" stroke-width="2" stroke-linecap="round">
+      <path d="M11.5 36 H5.5"/>
+      <path d="M52.5 36 H58.5"/>
+    </g>
+    <g fill="#52c58f">
+      <circle cx="5.5" cy="36" r="2.2"/>
+      <circle cx="58.5" cy="36" r="2.2"/>
+    </g>
+    <path d="M8 21 C9 12 13 5 17 5 C21 5 24 11 26 19 Z" fill="#171a21" stroke="#4cc9e8" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="M56 21 C55 12 51 5 47 5 C43 5 40 11 38 19 Z" fill="#171a21" stroke="#4cc9e8" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="M12 18 C13 12 15 8 17 8 C19 8 21 12 22 18 Z" fill="#52c58f" opacity="0.9"/>
+    <path d="M52 18 C51 12 49 8 47 8 C45 8 43 12 42 18 Z" fill="#52c58f" opacity="0.9"/>
+    <circle cx="32" cy="36" r="20.5" fill="#171a21" stroke="#4cc9e8" stroke-width="3"/>
+    <ellipse cx="23" cy="29.5" rx="5.6" ry="2.5" fill="#cfd6de" clip-path="url(#araiguma-app-head)"/>
+    <ellipse cx="41" cy="29.5" rx="5.6" ry="2.5" fill="#cfd6de" clip-path="url(#araiguma-app-head)"/>
+    <rect x="9" y="31" width="46" height="12.5" rx="6.25" fill="#07090c" clip-path="url(#araiguma-app-head)"/>
+    <circle cx="23.5" cy="37" r="4.2" fill="#4cc9e8"/>
+    <circle cx="40.5" cy="37" r="4.2" fill="#4cc9e8"/>
+    <circle cx="22.1" cy="35.7" r="1.2" fill="#e8eaef" opacity="0.9"/>
+    <circle cx="39.1" cy="35.7" r="1.2" fill="#e8eaef" opacity="0.9"/>
+    <path d="M32 45 C36.6 45 39.4 47.6 39.4 50.2 C39.4 53.4 36 55.4 32 55.4 C28 55.4 24.6 53.4 24.6 50.2 C24.6 47.6 27.4 45 32 45 Z" fill="#cfd6de"/>
+    <ellipse cx="32" cy="48.4" rx="2.1" ry="1.5" fill="#0b0f14"/>
+  </g>
+</svg>
